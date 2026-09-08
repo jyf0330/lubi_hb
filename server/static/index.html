@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="ZHC 与 YWT 的每日任务、计时、交付和验收看板">
+  <title>西游团队生产看板</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar"><div class="mark">✦</div><div><h1>西游团队生产看板</h1><p>每日任务与交付状态</p></div><nav><a href="#overview">总览</a><a href="#board">任务</a><a href="#timeline">时间轴</a></nav><span id="today" class="date"></span></header>
+  <main id="overview">
+    <section class="summary">
+      <article class="brief"><small>AI 今日简报</small><strong id="brief-title">正在读取服务器记录</strong><p id="brief-copy">请稍候…</p></article>
+      <article class="metric"><span>今日计划</span><b id="planned">—</b><small>建议总量 12–14 点</small></article>
+      <article class="metric"><span>已完成</span><b id="done">—</b><small id="rate">完成率 —</small></article>
+      <article class="metric"><span>待验收</span><b id="review-count">—</b><small>请及时检查交付</small></article>
+      <article class="metric"><span>阻塞</span><b id="blocked-count">—</b><small>需求、程序、素材或权限</small></article>
+    </section>
+
+    <section class="panel"><header><div><small>LIVE STATUS</small><h2>此刻谁在做什么</h2></div><span class="live"><i></i>服务器记录</span></header><div id="people" class="people"></div></section>
+
+    <section class="panel" id="board"><header><div><small>TODAY BOARD</small><h2>今日任务看板</h2></div><span id="task-total"></span></header><div id="kanban" class="kanban"></div></section>
+
+    <div class="lower">
+      <section class="panel" id="timeline"><header><div><small>TIMELINE</small><h2>今日工作轨迹</h2></div></header><div class="timeline-head"><span>时间</span><span>负责人</span><span>任务与结果</span></div><div id="sessions"></div><p class="footnote">未记录的时间只显示“未记录”，不作为考勤判断。</p></section>
+      <aside class="panel"><header><div><small>REVIEW</small><h2>需要你处理</h2></div><b id="action-count" class="count">0</b></header><div id="actions" class="actions"></div></aside>
+    </div>
+  </main>
+  <template id="empty"><div class="empty">暂无记录</div></template>
+  <script src="app.js" defer></script>
+</body>
+</html>
