@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import {
   AlertTriangle,
   ArrowRight,
@@ -16,31 +17,110 @@ import {
   Users,
 } from 'lucide-react';
 
-const people = [
-  { id: 'ZHC', name: '赵浩丞', task: '西游主界面按钮图标', type: '美术', started: '09:12', elapsed: '1h 48m', planned: 6.5, done: 2.5, accent: 'cyan' },
-  { id: 'YWT', name: '余文滔', task: '战斗流程回归测试', type: '测试', started: '10:05', elapsed: '55m', planned: 5, done: 2, accent: 'violet' },
+export const dynamic = 'force-dynamic';
+
+type TaskRow = {
+  id: string;
+  assignee: 'ZHC' | 'YWT';
+  title: string;
+  type: string;
+  status: string;
+  planned_points: number;
+  blocked_reason: string | null;
+  rework_count: number;
+  submitted_at: number | null;
+  completed_at: number | null;
+  is_paused: number;
+  updated_at: number;
+};
+
+type SessionRow = {
+  assignee: 'ZHC' | 'YWT';
+  title: string;
+  started_at: number;
+  ended_at: number | null;
+};
+
+type NowRow = { now_ms: number };
+
+const memberMeta = {
+  ZHC: { name: '赵浩丞', accent: 'cyan' },
+  YWT: { name: '余文滔', accent: 'violet' },
+} as const;
+
+const statusColumns = [
+  { title: '今日待办', tone: 'slate' },
+  { title: '进行中', tone: 'cyan' },
+  { title: '待验收', tone: 'amber' },
+  { title: '需修改', tone: 'rose' },
+  { title: '已完成', tone: 'green' },
+  { title: '阻塞', tone: 'red' },
 ] as const;
 
-const columns = [
-  { title: '今日待办', count: 2, tone: 'slate', tasks: [{ title: '商店价格表校对', owner: 'YWT', meta: '配置 · 1.5 点' }, { title: '活动页文案整理', owner: 'ZHC', meta: '文档 · 1 点' }] },
-  { title: '进行中', count: 2, tone: 'cyan', tasks: [{ title: '西游主界面按钮图标', owner: 'ZHC', meta: '09:12 开始 · 1h 48m' }, { title: '战斗流程回归测试', owner: 'YWT', meta: '10:05 开始 · 55m' }] },
-  { title: '待验收', count: 1, tone: 'amber', tasks: [{ title: '新手引导配置检查', owner: 'YWT', meta: '已提交 · 交付完整' }] },
-  { title: '需修改', count: 1, tone: 'rose', tasks: [{ title: '背包空状态插图', owner: 'ZHC', meta: '返工 1 次 · 待重新提交' }] },
-  { title: '已完成', count: 2, tone: 'green', tasks: [{ title: '角色技能资料归档', owner: 'ZHC', meta: '验收通过 · 1.5 点' }, { title: '登录异常复测', owner: 'YWT', meta: '验收通过 · 2 点' }] },
-  { title: '阻塞', count: 1, tone: 'red', tasks: [{ title: '渠道包配置', owner: 'YWT', meta: '等待签名权限' }] },
-] as const;
+function todayInShanghai() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
 
-const timeline = [
-  { time: '09:00', zhc: '角色技能资料归档', ywt: '登录异常复测', kind: 'done' },
-  { time: '10:00', zhc: '主界面按钮图标', ywt: '战斗流程回归测试', kind: 'active' },
-  { time: '11:00', zhc: '主界面按钮图标', ywt: '战斗流程回归测试', kind: 'active' },
-] as const;
+function formatClock(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(timestamp));
+}
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function taskMeta(task: TaskRow) {
+  if (task.status === '阻塞') return task.blocked_reason || '等待解除阻塞';
+  if (task.status === '需修改') return `返工 ${task.rework_count} 次 · 待重新提交`;
+  if (task.status === '待验收') return `已提交 · ${task.submitted_at ? formatClock(task.submitted_at) : '等待检查'}`;
+  if (task.status === '已完成') return `验收通过 · ${task.planned_points} 点`;
+  return `${task.type} · ${task.planned_points} 点`;
+}
 
 function Metric({ label, value, note, tone = 'neutral' }: { label: string; value: string; note: string; tone?: 'neutral' | 'good' | 'warn' }) {
   return <div className="metric-card"><div className="metric-label">{label}</div><div className={`metric-value metric-${tone}`}>{value}</div><div className="metric-note">{note}</div></div>;
 }
 
-export default function Home() {
+export default async function Home() {
+  const today = todayInShanghai();
+  const [taskResult, sessionResult, nowRow] = await Promise.all([
+    env.DB.prepare(`SELECT id, assignee, title, type, status, planned_points, blocked_reason, rework_count, submitted_at, completed_at, is_paused, updated_at FROM tasks WHERE planned_date = ? ORDER BY updated_at DESC`).bind(today).all<TaskRow>(),
+    env.DB.prepare(`SELECT ws.assignee, t.title, ws.started_at, ws.ended_at FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id WHERE t.planned_date = ? ORDER BY ws.started_at DESC LIMIT 12`).bind(today).all<SessionRow>(),
+    env.DB.prepare(`SELECT CAST(unixepoch('now') * 1000 AS INTEGER) AS now_ms`).first<NowRow>(),
+  ]);
+  const tasks = taskResult.results;
+  const sessions = sessionResult.results;
+  const now = Number(nowRow?.now_ms ?? 0);
+  const people = (['ZHC', 'YWT'] as const).map((id) => {
+    const ownTasks = tasks.filter((task) => task.assignee === id);
+    const activeTask = ownTasks.find((task) => task.status === '进行中');
+    const activeSession = activeTask ? sessions.find((session) => session.assignee === id && session.title === activeTask.title && session.ended_at === null) : undefined;
+    const planned = ownTasks.reduce((sum, task) => sum + Number(task.planned_points), 0);
+    const done = ownTasks.filter((task) => task.status === '已完成').reduce((sum, task) => sum + Number(task.planned_points), 0);
+    return {
+      id,
+      ...memberMeta[id],
+      task: activeTask?.title ?? '当前没有进行中的任务',
+      type: activeTask?.type ?? '未记录',
+      started: activeSession ? formatClock(activeSession.started_at) : null,
+      elapsed: activeSession ? formatDuration(Math.max(0, Math.floor((now - activeSession.started_at) / 60000))) : null,
+      paused: Boolean(activeTask?.is_paused),
+      planned,
+      done,
+    };
+  });
+  const plannedTotal = people.reduce((sum, person) => sum + person.planned, 0);
+  const doneTotal = people.reduce((sum, person) => sum + person.done, 0);
+  const waiting = tasks.filter((task) => task.status === '待验收');
+  const blocked = tasks.filter((task) => task.status === '阻塞');
+  const activeCount = people.filter((person) => person.started && !person.paused).length;
+  const lowCapacity = people.filter((person) => person.planned < 6).map((person) => person.id);
+  const reviewTasks = tasks.filter((task) => ['待验收', '需修改', '阻塞'].includes(task.status)).slice(0, 5);
+  const dateLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric' }).format(new Date());
+
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <header className="topbar">
@@ -49,23 +129,23 @@ export default function Home() {
         <nav className="topnav" aria-label="主导航">
           <a className="nav-active" href="#overview"><LayoutDashboard size={16} />总览</a><a href="#board"><ListChecks size={16} />任务</a><a href="#timeline"><Clock3 size={16} />时间轴</a><a href="#members"><Users size={16} />成员</a>
         </nav>
-        <div className="date-chip">今天 · 9月8日 <ChevronDown size={14} /></div>
+        <div className="date-chip">今天 · {dateLabel} <ChevronDown size={14} /></div>
       </header>
 
       <div className="dashboard-shell" id="overview">
         <section className="summary-row" aria-label="今日摘要">
-          <div className="status-brief"><div className="eyebrow"><Bot size={14} /> AI 今日简报</div><div className="brief-line"><span className="pulse-dot" />2 人正在执行任务，当前无新增阻塞</div><p>YWT 今日计划 5 点，低于建议负荷；有 1 项任务等待验收。</p></div>
-          <Metric label="今日计划" value="11.5 点" note="建议总量 12–14 点" /><Metric label="已完成" value="4.5 点" note="完成率 39%" tone="good" /><Metric label="待验收" value="1 项" note="已等待 36 分钟" tone="warn" /><Metric label="阻塞" value="1 项" note="等待签名权限" tone="warn" />
+          <div className="status-brief"><div className="eyebrow"><Bot size={14} /> AI 今日简报</div><div className="brief-line"><span className="pulse-dot" />{activeCount} 人正在执行任务，{blocked.length ? `${blocked.length} 项阻塞` : '当前无阻塞'}</div><p>{lowCapacity.length ? `${lowCapacity.join('、')} 今日计划低于 6 点；` : '两人计划工作量均达到 6 点；'}有 {waiting.length} 项任务等待验收。</p></div>
+          <Metric label="今日计划" value={`${plannedTotal} 点`} note="建议总量 12–14 点" /><Metric label="已完成" value={`${doneTotal} 点`} note={`完成率 ${plannedTotal ? Math.round((doneTotal / plannedTotal) * 100) : 0}%`} tone="good" /><Metric label="待验收" value={`${waiting.length} 项`} note={waiting.length ? '请及时检查交付结果' : '当前无需处理'} tone={waiting.length ? 'warn' : 'neutral'} /><Metric label="阻塞" value={`${blocked.length} 项`} note={blocked[0]?.blocked_reason || '当前无阻塞'} tone={blocked.length ? 'warn' : 'neutral'} />
         </section>
 
         <section className="section-block" id="members">
-          <div className="section-heading"><div><span className="section-kicker">LIVE STATUS</span><h2>此刻谁在做什么</h2></div><div className="live-label"><span />实时更新</div></div>
+          <div className="section-heading"><div><span className="section-kicker">LIVE STATUS</span><h2>此刻谁在做什么</h2></div><div className="live-label"><span />读取服务器记录</div></div>
           <div className="people-grid">
             {people.map((person) => {
-              const remaining = person.planned - person.done;
-              const pct = Math.round((person.done / person.planned) * 100);
+              const remaining = Math.max(0, person.planned - person.done);
+              const pct = person.planned ? Math.min(100, Math.round((person.done / person.planned) * 100)) : 0;
               return <article className={`person-card accent-${person.accent}`} key={person.id}>
-                <div className="person-main"><div className="avatar">{person.id}</div><div className="person-copy"><div className="person-name"><strong>{person.name}</strong><span>{person.id}</span></div><div className="working"><Play size={12} fill="currentColor" />进行中</div><h3>{person.task}</h3><p>{person.type} · {person.started} 开始</p></div><div className="elapsed"><span>持续</span><strong>{person.elapsed}</strong></div></div>
+                <div className="person-main"><div className="avatar">{person.id}</div><div className="person-copy"><div className="person-name"><strong>{person.name}</strong><span>{person.id}</span></div><div className="working"><Play size={12} fill="currentColor" />{person.started ? (person.paused ? '已暂停' : '进行中') : '未记录'}</div><h3>{person.task}</h3><p>{person.started ? `${person.type} · ${person.started} 开始` : '等待员工从 work 对话开始任务'}</p></div><div className="elapsed"><span>{person.started ? '持续' : '记录'}</span><strong>{person.elapsed ?? '—'}</strong></div></div>
                 <div className="workload"><div className="bar-copy"><span>今日完成 {person.done} / {person.planned} 点</span><span>剩余 {remaining} 点</span></div><div className="progress-track"><span style={{ width: `${pct}%` }} /></div></div>
                 {person.planned < 6 && <div className="capacity-warning"><AlertTriangle size={14} />今日计划低于 6 点，建议补充任务</div>}
               </article>;
@@ -74,23 +154,26 @@ export default function Home() {
         </section>
 
         <section className="section-block board-section" id="board">
-          <div className="section-heading"><div><span className="section-kicker">TODAY BOARD</span><h2>今日任务看板</h2></div><div className="board-legend"><CircleDashed size={15} />共 9 项任务</div></div>
+          <div className="section-heading"><div><span className="section-kicker">TODAY BOARD</span><h2>今日任务看板</h2></div><div className="board-legend"><CircleDashed size={15} />共 {tasks.length} 项任务</div></div>
           <div className="kanban-scroll"><div className="kanban-grid">
-            {columns.map((column) => <section className={`kanban-column tone-${column.tone}`} key={column.title}><header><span className="column-dot" /><h3>{column.title}</h3><b>{column.count}</b></header><div className="task-stack">{column.tasks.map((task) => <article className="task-card" key={task.title}><div className="task-owner">{task.owner}</div><h4>{task.title}</h4><p>{task.meta}</p></article>)}</div></section>)}
+            {statusColumns.map((column) => {
+              const columnTasks = tasks.filter((task) => task.status === column.title);
+              return <section className={`kanban-column tone-${column.tone}`} key={column.title}><header><span className="column-dot" /><h3>{column.title}</h3><b>{columnTasks.length}</b></header><div className="task-stack">{columnTasks.length ? columnTasks.map((task) => <article className="task-card" key={task.id}><div className="task-owner">{task.assignee}</div><h4>{task.title}</h4><p>{taskMeta(task)}</p></article>) : <article className="task-card"><h4>暂无任务</h4><p>员工更新后自动显示</p></article>}</div></section>;
+            })}
           </div></div>
         </section>
 
         <div className="lower-grid">
           <section className="section-block timeline-panel" id="timeline">
-            <div className="section-heading compact"><div><span className="section-kicker">TIMELINE</span><h2>今日工作轨迹</h2></div><button className="text-action">查看完整时间轴 <ArrowRight size={14} /></button></div>
+            <div className="section-heading compact"><div><span className="section-kicker">TIMELINE</span><h2>今日工作轨迹</h2></div><span className="text-action">最近 {sessions.length} 条记录 <ArrowRight size={14} /></span></div>
             <div className="timeline-head"><span>时间</span><span>ZHC · 赵浩丞</span><span>YWT · 余文滔</span></div>
-            {timeline.map((row) => <div className="timeline-row" key={row.time}><time>{row.time}</time><div className={`timeline-task ${row.kind}`}><span />{row.zhc}</div><div className={`timeline-task ${row.kind}`}><span />{row.ywt}</div></div>)}
+            {sessions.length ? sessions.map((session, index) => <div className="timeline-row" key={`${session.assignee}-${session.started_at}-${index}`}><time>{formatClock(session.started_at)}</time><div className={`timeline-task ${session.assignee === 'ZHC' ? (session.ended_at ? 'done' : 'active') : ''}`}><span />{session.assignee === 'ZHC' ? session.title : '未记录'}</div><div className={`timeline-task ${session.assignee === 'YWT' ? (session.ended_at ? 'done' : 'active') : ''}`}><span />{session.assignee === 'YWT' ? session.title : '未记录'}</div></div>) : <div className="timeline-row"><time>—</time><div className="timeline-task"><span />未记录</div><div className="timeline-task"><span />未记录</div></div>}
             <div className="timeline-footnote">未记录的时间只显示“未记录”，不作为考勤判断。</div>
           </section>
           <aside className="section-block review-panel">
-            <div className="section-heading compact"><div><span className="section-kicker">REVIEW</span><h2>需要你处理</h2></div><span className="review-count">3</span></div>
-            <div className="review-list"><div className="review-item"><ShieldCheck size={17} /><div><strong>新手引导配置检查</strong><span>YWT · 等待验收 36 分钟</span></div></div><div className="review-item"><RefreshCcw size={17} /><div><strong>背包空状态插图</strong><span>ZHC · 返工 1 次</span></div></div><div className="review-item"><TimerReset size={17} /><div><strong>渠道包配置</strong><span>YWT · 等待签名权限</span></div></div></div>
-            <a className="primary-action" href="#board"><CheckCircle2 size={16} />查看待验收任务</a>
+            <div className="section-heading compact"><div><span className="section-kicker">REVIEW</span><h2>需要你处理</h2></div><span className="review-count">{reviewTasks.length}</span></div>
+            <div className="review-list">{reviewTasks.length ? reviewTasks.map((task) => <div className="review-item" key={task.id}>{task.status === '待验收' ? <ShieldCheck size={17} /> : task.status === '需修改' ? <RefreshCcw size={17} /> : <TimerReset size={17} />}<div><strong>{task.title}</strong><span>{task.assignee} · {taskMeta(task)}</span></div></div>) : <div className="review-item"><CheckCircle2 size={17} /><div><strong>当前无需处理</strong><span>待验收、返工和阻塞会显示在这里</span></div></div>}</div>
+            <a className="primary-action" href="#board"><CheckCircle2 size={16} />查看任务看板</a>
           </aside>
         </div>
       </div>
