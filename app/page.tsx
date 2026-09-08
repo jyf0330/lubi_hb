@@ -125,7 +125,7 @@ export default async function Home() {
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <header className="topbar">
         <div className="brand-mark"><Sparkles size={18} /></div>
-        <div><h1>西游 · 生产作战室</h1><p>每日任务与交付状态</p></div>
+        <div><h1>西游团队生产看板</h1><p>每日任务与交付状态</p></div>
         <nav className="topnav" aria-label="主导航">
           <a className="nav-active" href="#overview"><LayoutDashboard size={16} />总览</a><a href="#board"><ListChecks size={16} />任务</a><a href="#timeline"><Clock3 size={16} />时间轴</a><a href="#members"><Users size={16} />成员</a>
         </nav>
