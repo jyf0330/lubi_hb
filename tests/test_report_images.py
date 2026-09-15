@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
 import app
 import report_images
+import report_files
 
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1sAAAAASUVORK5CYII=')
 
@@ -116,7 +117,7 @@ class ReportImagesTests(unittest.TestCase):
         with patch.object(report_images, 'MAX_TOTAL_BYTES', len(PNG)):
             with self.assertRaises(ValueError):
                 report_images.decode_images([image, image])
-        with patch.object(report_images, 'MAX_REQUEST_BYTES', 32):
+        with patch.object(report_images, 'MAX_REQUEST_BYTES', 32), patch.object(report_files, 'MAX_REQUEST_BYTES', 32):
             with self.assertRaises(HTTPError) as caught:
                 self.post('heartbeat', self.payload(), self.worker)
             self.assertEqual(caught.exception.code, 400)

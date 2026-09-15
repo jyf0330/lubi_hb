@@ -261,9 +261,8 @@ function renderHeartbeatImages(){
   const total=heartbeatImages.reduce((sum,image)=>sum+image.file.size,0);
   $('#heartbeat-image-status').textContent=heartbeatImages.length?'已选 '+heartbeatImages.length+' / 6 张 · '+(total/1024/1024).toFixed(1)+' / 12 MB · 提交时自动压缩':'';
 }
-$('#heartbeat-images').onchange=e=>{
+function addHeartbeatImages(files){
   if(busy)return;
-  const files=[...e.target.files];e.target.value='';
   let error='';
   if(files.length+heartbeatImages.length>6)error='每次汇报最多上传 6 张图片。';
   else if(files.some(file=>!['image/png','image/jpeg','image/webp'].includes(file.type)))error='仅支持 PNG、JPG 和 WebP 图片。';
@@ -271,7 +270,23 @@ $('#heartbeat-images').onchange=e=>{
   else if([...files,...heartbeatImages.map(image=>image.file)].reduce((sum,file)=>sum+file.size,0)>12*1024*1024)error='每次汇报的图片合计不能超过 12 MB。';
   if(error){$('#heartbeat-image-status').textContent=error;return;}
   heartbeatImages.push(...files.map(file=>({file,url:URL.createObjectURL(file)})));renderHeartbeatImages();
+}
+$('#heartbeat-images').onchange=e=>{
+  const files=[...e.target.files];e.target.value='';addHeartbeatImages(files);
 };
+const handleHeartbeatPaste=e=>{
+  const files=[...e.clipboardData.items]
+    .filter(item=>item.kind==='file'&&item.type.startsWith('image/'))
+    .map(item=>item.getAsFile())
+    .filter(Boolean);
+  if(!files.length)return;
+  e.preventDefault();
+  addHeartbeatImages(files);
+};
+const heartbeatDetail=$('#heartbeat textarea[name="detail"]');
+if(typeof heartbeatDetail.addEventListener==='function')heartbeatDetail.addEventListener('paste',handleHeartbeatPaste);
+else heartbeatDetail.onpaste=handleHeartbeatPaste;
+$('#heartbeat-image-help').textContent+=' 也可以直接在“简短说明”里粘贴图片。';
 $('#heartbeat-image-previews').onclick=e=>{
   const button=e.target.closest('[data-remove-image]');if(!button||busy)return;
   const [image]=heartbeatImages.splice(Number(button.dataset.removeImage),1);
