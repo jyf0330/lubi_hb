@@ -1,4 +1,5 @@
 const $ = (s) => document.querySelector(s);
+$('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
@@ -143,7 +144,7 @@ function checkPlan(){
 function previewWork(){
   workPlan=null;planRequestId=null;
   try{const task=parseWorkText($('#work-text').value);workPlan={group:{title:task.title,deliverable_expectation:task.deliverable_expectation,acceptance_criteria:task.acceptance_criteria},tasks:[task],stated_minutes:task.estimated_minutes,warnings:[]};planRequestId=newRequestId();$('#work-validation').textContent='已识别五字段描述，可以修改后登记。';}
-  catch{$('#work-validation').textContent='点击 AI 整理，或手动创建任务。';}
+  catch{$('#work-validation').textContent='点击“AI 整理（DeepSeek）”，或手动创建任务。';}
   renderPlan();return workPlan;
 }
 $('#work-text').oninput=()=>{storage('work-source:'+user,$('#work-text').value);previewWork();};
@@ -153,9 +154,9 @@ $('#ai-plan').onclick=async()=>{
   const source=$('#work-text').value.trim();if(!source){notice('请先填写工作描述。',true);return;}
   if(planning||busy)return;
   planning=true;$('#ai-plan').disabled=true;$('#manual-plan').disabled=true;$('#work-text').readOnly=true;$('#work-preview').inert=true;$('#confirm-plan').disabled=true;
-  $('#work-validation').textContent='正在整理，请稍候；不会登记或开始计时。';
+  $('#work-validation').textContent='正在使用 DeepSeek 整理，请稍候；不会登记或开始计时。';
   const owner=user;
-  try{const result=await api('plan',{source_text:source});if(user!==owner)return;workPlan=result.plan;planRequestId=newRequestId();renderPlan();$('#work-validation').textContent='已生成草稿，请检查拆分、工时和待补充信息。';}
+  try{const result=await api('plan',{source_text:source});if(user!==owner)return;workPlan=result.plan;planRequestId=newRequestId();renderPlan();$('#work-validation').textContent='已生成 DeepSeek 草稿，请检查拆分、工时和待补充信息。';}
   catch(e){$('#work-validation').textContent=e.message;notice(e.message,true);}
   finally{planning=false;$('#ai-plan').disabled=false;$('#manual-plan').disabled=false;$('#work-text').readOnly=false;$('#work-preview').inert=false;checkPlan();}
 };

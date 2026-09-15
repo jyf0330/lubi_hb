@@ -73,14 +73,14 @@ def generate_plan(source, member, prompt=PROMPT, validator=validate_plan):
     source = text(source, '工作描述', 8000)
     key = os.environ.get('DEEPSEEK_API_KEY', '').strip()
     if not key:
-        raise ValueError('AI 整理尚未配置，请联系负责人；也可以手动整理。')
+        raise ValueError('DeepSeek AI 整理尚未配置，请联系负责人；也可以手动整理。')
     with _LOCK:
         if member in _ACTIVE or time.monotonic() - _LAST.get(member, -100) < 10:
             raise ValueError('正在整理或请求过于频繁，请稍后重试。')
         _ACTIVE.add(member)
         _LAST[member] = time.monotonic()
     try:
-        body = {'model': os.environ.get('DEEPSEEK_MODEL', 'deepseek-v4-flash'),
+        body = {'model': os.environ.get('DEEPSEEK_MODEL', 'deepseek-flash'),
                 'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': source}],
                 'response_format': {'type': 'json_object'}, 'max_tokens': 6000, 'stream': False,
                 'thinking': {'type': 'disabled'}}
