@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS deliverables (
 
 CREATE INDEX IF NOT EXISTS idx_deliverables_task_id ON deliverables (task_id);
 
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  body BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id);
+
 CREATE TABLE IF NOT EXISTS progress_images (
   id TEXT PRIMARY KEY,
   progress_id TEXT NOT NULL REFERENCES progress_updates(id) ON DELETE CASCADE,

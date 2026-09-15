@@ -4,6 +4,7 @@ from __future__ import annotations
 import workflow
 import report_images
 import report_files
+import task_files
 import argparse
 import hmac
 import json
@@ -383,7 +384,13 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
         if name in ('owner_insert_task', 'owner_review_task', 'work_set_high_priority', 'work_unblock_task'):
+            attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
+            if attachments:
+                db.executemany(
+                    "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",
+                    [(file_id, str(args.get("task_id", "")), name, mime, body) for file_id, name, mime, body in attachments],
+                )
             return tool_result(result.pop('message'), **result)
         if name == "work_get_active":
             active_tasks = [dict(r) for r in db.execute("SELECT * FROM tasks WHERE assignee=? AND status='进行中' ORDER BY updated_at DESC", (member,))]
@@ -568,11 +575,16 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             reason = str(args.get("reason", "")).strip()[:500]
             if len(reason) < 2:
                 raise ValueError("请填写阻塞原因。")
+            attachments = task_files.decode_files(args.get("attachments", []))
             open_session = db.execute("SELECT id FROM work_sessions WHERE task_id = ? AND ended_at IS NULL LIMIT 1", (task_id,)).fetchone()
             if open_session:
                 db.execute("UPDATE work_sessions SET ended_at = ?, end_reason = '阻塞' WHERE id = ?", (timestamp, open_session["id"]))
             db.execute("UPDATE tasks SET status = '阻塞', is_paused = 0, blocked_reason = ?, updated_at = ? WHERE id = ?", (reason, timestamp, task_id))
             event(db, task_id, member, "任务阻塞", task["status"], "阻塞", reason, timestamp)
+            db.executemany(
+                "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",
+                [(file_id, task_id, name, mime, body) for file_id, name, mime, body in attachments],
+            )
             return tool_result(f"已标记阻塞：{task['title']}", task_id=task_id, status="阻塞", reason=reason)
 
         if name == "work_finish_task":
@@ -581,6 +593,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             summary = str(args.get("summary", "")).strip()[:1200]
             if len(summary) < 2:
                 raise ValueError("请填写完成总结。")
+            attachments = task_files.decode_files(args.get("attachments", []))
             employee_score = args.get('employee_ai_points')
             employee_reason = str(args.get('employee_ai_reason') or '').strip()
             if employee_score is not None:
@@ -610,6 +623,10 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
                 variance_reason = None
             db.execute("UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?, variance_reason = ?, submitted_at = ?, updated_at = ? WHERE id = ?", (summary, variance_reason, timestamp, timestamp, task_id))
             event(db, task_id, member, "提交验收", "进行中", "待验收", summary, timestamp)
+            db.executemany(
+                "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",
+                [(file_id, task_id, name, mime, body) for file_id, name, mime, body in attachments],
+            )
             return tool_result(f"已提交待验收：{task['title']}，实际记录 {minutes} 分钟，{assessment['effort_status']}。", task_id=task_id, status="待验收", submitted_at=timestamp, variance_reason=variance_reason, summary=summary, deliverables=urls, **assessment)
 
         raise ValueError("未知工具。")
@@ -838,6 +855,7 @@ def task_groups(db, member=None):
     for row in rows:
         group = dict(row)
         children = [dict(t) for t in db.execute("SELECT * FROM tasks WHERE group_id = ? ORDER BY group_order", (row["id"],))]
+        task_files.attach_metadata(db, children)
         timestamp = now_ms()
         for child in children:
             child["actual_minutes"] = actual_minutes(db, child["id"], timestamp)
@@ -883,6 +901,7 @@ def dashboard_data() -> dict[str, object]:
         scores = workflow.daily_scores(db, today())
         report_images.attach_metadata(db, progress_updates)
         report_files.attach_metadata(db, progress_updates)
+        task_files.attach_metadata(db, tasks)
         groups = task_groups(db)
         reports = [dict(row) for row in db.execute("SELECT assignee, summary, submitted_at FROM daily_reports WHERE report_date = ? ORDER BY assignee", (today(),)).fetchall()]
         tomorrow_tasks = [dict(row) for row in db.execute("SELECT id, assignee, title, type, status, estimated_minutes, planned_points FROM tasks WHERE planned_date = ? ORDER BY assignee, created_at", (date_string(1),)).fetchall()]
@@ -909,7 +928,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(403, {"error": "请从员工页面提交。"})
                 return
             length = int(self.headers.get("Content-Length", "0"))
-            limit = max(report_images.MAX_REQUEST_BYTES, report_files.MAX_REQUEST_BYTES) if path == "/api/employee/heartbeat" else 65536
+            limit = max(report_images.MAX_REQUEST_BYTES, report_files.MAX_REQUEST_BYTES) if path == "/api/employee/heartbeat" else task_files.MAX_REQUEST_BYTES if path == "/api/employee/action" else 65536
             if path == "/api/employee/heartbeat" and not self.employee_member():
                 self.send_json(401, {"error": "请先填写姓名进入。"})
                 return
@@ -1027,7 +1046,24 @@ class Handler(BaseHTTPRequestHandler):
                 progress = [dict(row) for row in db.execute("SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at FROM progress_updates p JOIN tasks t ON t.id=p.task_id WHERE p.assignee=? AND t.assignee=? ORDER BY p.created_at DESC LIMIT 20", (member, member))]
                 report_images.attach_metadata(db, progress)
                 report_files.attach_metadata(db, progress)
+                task_files.attach_metadata(db, tasks)
+                task_files.attach_metadata(db, completed)
             self.send_json(200, {"groups": groups, "name": next(n for n, m in EMPLOYEE_NAMES.items() if m == member), "member": member, "role": member_role(member), "is_admin": member == "YWH", "date": today(), "scores": scores, "completed": completed, "progress": progress, "tasks": tasks, "server_time": now_ms()})
+        elif path.startswith("/api/task-files/"):
+            member = self.employee_member()
+            if not member:
+                self.send_json(401, {"error": "请先登录员工页面下载附件。"})
+                return
+            with connect() as db:
+                row = db.execute(
+                    "SELECT a.body,a.content_type,a.name FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND (t.assignee=? OR ?='YWH')",
+                    (path.rsplit("/", 1)[-1], member, member),
+                ).fetchone()
+            if row:
+                safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
+                self.send_bytes(200, row["body"], row["content_type"], {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"})
+            else:
+                self.send_json(404, {"error": "附件不存在或无权下载。"})
         elif path.startswith("/api/report-images/"):
             member = self.employee_member()
             if not member:

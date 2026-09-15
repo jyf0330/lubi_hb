@@ -9,6 +9,7 @@ import {
   ChevronDown,
   CircleDashed,
   Clock3,
+  FileUp,
   LayoutDashboard,
   ListChecks,
   LoaderCircle,
@@ -45,12 +46,13 @@ import {
   releaseImageDrafts,
   type PastedImageDraft,
 } from '@/components/paste-image-field';
+import {
+  encodeFileDrafts,
+  FileAttachmentField,
+  type FileAttachmentDraft,
+} from '@/components/file-attachment-field';
 import { PomodoroTimer } from '@/components/pomodoro-timer';
-import type {
-  SessionRow,
-  TaskAttachmentRow,
-  TaskRow,
-} from '@/lib/task-data';
+import type { SessionRow, TaskAttachmentRow, TaskRow } from '@/lib/task-data';
 import {
   MEMBERS,
   TASK_TYPES,
@@ -162,6 +164,11 @@ function formatDuration(minutes: number) {
   return rest ? `${hours} 小时 ${rest} 分` : `${hours} 小时`;
 }
 
+function formatAttachmentSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function taskMeta(task: TaskRow) {
   if (task.status === '任务池')
     return `${task.type} · ${task.planned_points} 点 · 待领取`;
@@ -228,7 +235,9 @@ export function TaskDashboard({
   const [detail, setDetail] = useState('');
   const [deliverableUrl, setDeliverableUrl] = useState('');
   const [draftImages, setDraftImages] = useState<PastedImageDraft[]>([]);
+  const [draftFiles, setDraftFiles] = useState<FileAttachmentDraft[]>([]);
   const [actionImages, setActionImages] = useState<PastedImageDraft[]>([]);
+  const [actionFiles, setActionFiles] = useState<FileAttachmentDraft[]>([]);
   const [taskAttachments, setTaskAttachments] = useState<TaskAttachmentRow[]>(
     [],
   );
@@ -329,6 +338,7 @@ export function TaskDashboard({
     setNotice(null);
     try {
       const images = await encodeImageDrafts(draftImages);
+      const files = await encodeFileDrafts(draftFiles);
       await readResponse(
         await fetch('/api/tasks', {
           method: 'POST',
@@ -338,11 +348,13 @@ export function TaskDashboard({
             actor,
             assignee: draft.assignee === 'UNASSIGNED' ? null : draft.assignee,
             images,
+            files,
           }),
         }),
       );
       releaseImageDrafts(draftImages);
       setDraftImages([]);
+      setDraftFiles([]);
       setDraft(emptyDraft);
       setCreateOpen(false);
       setNotice({ kind: 'ok', text: '任务已创建并保存。' });
@@ -369,6 +381,7 @@ export function TaskDashboard({
       setDeliverableUrl('');
       releaseImageDrafts(actionImages);
       setActionImages([]);
+      setActionFiles([]);
       return;
     }
     setBusy(true);
@@ -401,6 +414,7 @@ export function TaskDashboard({
     setNotice(null);
     try {
       const images = await encodeImageDrafts(actionImages);
+      const files = await encodeFileDrafts(actionFiles);
       const body = await readResponse(
         await fetch(`/api/tasks/${selectedTask.id}/action`, {
           method: 'POST',
@@ -411,11 +425,13 @@ export function TaskDashboard({
             detail,
             deliverableUrl,
             images,
+            files,
           }),
         }),
       );
       releaseImageDrafts(actionImages);
       setActionImages([]);
+      setActionFiles([]);
       setPendingAction(null);
       setSelectedTask(null);
       setNotice({ kind: 'ok', text: body.message || '操作成功。' });
@@ -757,6 +773,7 @@ export function TaskDashboard({
           if (!open) {
             releaseImageDrafts(draftImages);
             setDraftImages([]);
+            setDraftFiles([]);
           }
         }}
       >
@@ -1045,7 +1062,7 @@ export function TaskDashboard({
                 </div>
               )}
               <div className="field field-wide">
-                <span>备注（支持粘贴图片）</span>
+                <span>备注与附件</span>
                 <PasteImageField
                   id="task-notes"
                   value={draft.notes}
@@ -1054,6 +1071,10 @@ export function TaskDashboard({
                   onChange={(event) =>
                     setDraft({ ...draft, notes: event.target.value })
                   }
+                />
+                <FileAttachmentField
+                  files={draftFiles}
+                  onFilesChange={setDraftFiles}
                 />
               </div>
             </div>
@@ -1064,6 +1085,7 @@ export function TaskDashboard({
                 onClick={() => {
                   releaseImageDrafts(draftImages);
                   setDraftImages([]);
+                  setDraftFiles([]);
                   setCreateOpen(false);
                 }}
               >
@@ -1157,8 +1179,8 @@ export function TaskDashboard({
                 )}
                 {taskAttachments.length > 0 && (
                   <div>
-                    <span>图片附件</span>
-                    <div className="stored-image-list">
+                    <span>附件（{taskAttachments.length}）</span>
+                    <div className="stored-attachment-list">
                       {taskAttachments.map((attachment) => (
                         <a
                           href={`/api/tasks/${selectedTask.id}/attachments/${attachment.id}`}
@@ -1166,15 +1188,24 @@ export function TaskDashboard({
                           target="_blank"
                           rel="noreferrer"
                         >
-                          {/* oxlint-disable-next-line next/no-img-element */}
-                          <img
-                            src={
-                              attachment.url ??
-                              `/api/tasks/${selectedTask.id}/attachments/${attachment.id}`
-                            }
-                            alt={attachment.name}
-                          />
-                          <span>{attachment.name}</span>
+                          {attachment.content_type.startsWith('image/') ? (
+                            /* oxlint-disable-next-line next/no-img-element */
+                            <img
+                              src={
+                                attachment.url ??
+                                `/api/tasks/${selectedTask.id}/attachments/${attachment.id}`
+                              }
+                              alt={attachment.name}
+                            />
+                          ) : (
+                            <FileUp size={22} aria-hidden="true" />
+                          )}
+                          <span title={attachment.name}>
+                            {attachment.name}
+                            <small>
+                              {formatAttachmentSize(attachment.size)}
+                            </small>
+                          </span>
                         </a>
                       ))}
                     </div>
@@ -1255,6 +1286,7 @@ export function TaskDashboard({
           if (!open) {
             releaseImageDrafts(actionImages);
             setActionImages([]);
+            setActionFiles([]);
             setPendingAction(null);
           }
         }}
@@ -1267,7 +1299,9 @@ export function TaskDashboard({
                 <DialogDescription>{selectedTask.title}</DialogDescription>
               </DialogHeader>
               <div className="field action-field">
-                <span>{actionCopy[pendingAction].detail}（支持粘贴图片）</span>
+                <span>
+                  {actionCopy[pendingAction].detail}（支持图片与文件附件）
+                </span>
                 <PasteImageField
                   id="action-detail"
                   required={['submit', 'rework', 'block'].includes(
@@ -1278,6 +1312,10 @@ export function TaskDashboard({
                   onImagesChange={setActionImages}
                   onChange={(event) => setDetail(event.target.value)}
                   placeholder={actionCopy[pendingAction].placeholder}
+                />
+                <FileAttachmentField
+                  files={actionFiles}
+                  onFilesChange={setActionFiles}
                 />
               </div>
               {pendingAction === 'submit' && (
@@ -1302,6 +1340,7 @@ export function TaskDashboard({
                   onClick={() => {
                     releaseImageDrafts(actionImages);
                     setActionImages([]);
+                    setActionFiles([]);
                     setPendingAction(null);
                   }}
                 >

@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
+let user = null, items = [], groupCache = [], busy = false, selected = null, actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(text, error=false){$('#notice').textContent=text;$('#notice').className=error?'error':'';}
@@ -55,7 +55,7 @@ function renderPersonal(data){
   $('#owner-dashboard').href=new URL('../..',apiBase).href;
   $('#personal-summary').innerHTML='<div><small>今日审核得分</small><strong>'+todayPoints+' 点</strong></div><div><small>近 7 天得分</small><strong>'+total+' 点</strong></div><div><small>等待审核</small><strong>'+data.tasks.filter(t=>t.status==='待验收').length+' 项</strong></div><div><small>当前高优先</small><strong>'+esc(high?.title||'暂无')+'</strong></div>';
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
-  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p></article>').join(''):'<p>还没有审核通过的任务。</p>';
+  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskFileGallery(t.attachments)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+new Date(p.created_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
 }
 async function refresh(){
@@ -79,7 +79,7 @@ async function refresh(){
     if(['今日待办','需修改'].includes(t.status))buttons+=button('work_start_task','开始');
     if(t.status==='进行中'){buttons+=button(t.is_paused?'work_resume_task':'work_pause_task',t.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
     if(['今日待办','进行中','需修改'].includes(t.status))buttons+=button('work_block_task','遇到阻塞');
-    return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+'<div class="buttons">'+buttons+'</div></article>';
+    return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskFileGallery(t.attachments)+'<div class="buttons">'+buttons+'</div></article>';
   };
   const groups = data.groups || [];
   groupCache = groups;
@@ -330,6 +330,32 @@ $('#heartbeat-archive-previews').onclick=e=>{
   const [archive]=heartbeatArchives.splice(Number(button.dataset.removeArchive),1);
   if(archive)URL.revokeObjectURL(archive.url);renderHeartbeatArchives();
 };
+function readTaskFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(Error('无法读取文件：'+file.name));
+    reader.onabort=()=>reject(Error('文件读取已取消。'));
+    reader.onload=()=>resolve({name:file.name,data:typeof reader.result==='string'?reader.result.split(',')[1]:'',contentType:file.type||'application/octet-stream'});
+    reader.readAsDataURL(file);
+  });
+}
+function renderTaskFiles(){
+  $('#action-file-previews').innerHTML=actionFiles.map((item,index)=>'<div class="archive-preview"><span aria-hidden="true">▣</span><strong>'+esc(item.file.name||'附件')+'</strong><small>'+formatFileSize(item.file.size)+'</small><button type="button" data-remove-task-file="'+index+'" aria-label="移除 '+esc(item.file.name||'附件')+'">移除</button></div>').join('');
+  const total=actionFiles.reduce((sum,item)=>sum+item.file.size,0);
+  $('#action-file-status').textContent=actionFiles.length?'已选 '+actionFiles.length+' / 6 个文件 · '+(total/1024/1024).toFixed(1)+' / 40 MB':'';
+}
+function formatFileSize(size){return size<1024*1024?Math.max(1,Math.round(size/1024))+' KB':(size/1024/1024).toFixed(1)+' MB';}
+function addTaskFiles(files){
+  if(busy)return;
+  let error='';
+  if(files.length+actionFiles.length>6)error='每次最多上传 6 个文件。';
+  else if(files.some(file=>!file.size||file.size>20*1024*1024))error='文件不能为空，且单个不能超过 20 MB。';
+  else if([...files,...actionFiles.map(item=>item.file)].reduce((sum,file)=>sum+file.size,0)>40*1024*1024)error='文件合计不能超过 40 MB。';
+  if(error){$('#action-file-status').textContent=error;return;}
+  actionFiles.push(...files.map(file=>({file})));renderTaskFiles();
+}
+$('#action-files').onchange=e=>{const files=[...e.target.files];e.target.value='';addTaskFiles(files);};
+$('#action-file-previews').onclick=e=>{const button=e.target.closest('[data-remove-task-file]');if(!button||busy)return;actionFiles.splice(Number(button.dataset.removeTaskFile),1);renderTaskFiles();};
 $('#tasks').onclick=async e=>{
   if(planning||busy)return;
   const append=e.target.closest('button[data-append-group]');
@@ -346,11 +372,11 @@ $('#tasks').onclick=async e=>{
   const b=e.target.closest('button[data-action]');
   if(!b)return;
   selected={action:b.dataset.action,id:b.dataset.id};
-  if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();$('#action-dialog').showModal();}
+  if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
   else await run(selected.action,{task_id:selected.id});
 };
 $('#cancel').onclick=()=>$('#action-dialog').close();
-$('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const args={task_id:selected.id,...(selected.action==='work_finish_task'?{summary:d.detail,...(d.employee_ai_points!==''?{employee_ai_points:Number(d.employee_ai_points),employee_ai_reason:d.employee_ai_reason}:{})}:{reason:d.detail})};if(await run(selected.action,args))$('#action-dialog').close();};
+$('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const note=$('#action-file-status');try{note.textContent=actionFiles.length?'正在读取附件，请稍候…':'';const attachments=await Promise.all(actionFiles.map(item=>readTaskFile(item.file)));const args={task_id:selected.id,attachments,...(selected.action==='work_finish_task'?{summary:d.detail,...(d.employee_ai_points!==''?{employee_ai_points:Number(d.employee_ai_points),employee_ai_reason:d.employee_ai_reason}:{})}:{reason:d.detail})};if(await run(selected.action,args)){actionFiles=[];renderTaskFiles();$('#action-dialog').close();}}catch(error){note.textContent=error.message;notice(error.message,true);}};
 $('#append-cancel').onclick=()=>{appendGroupId=null;appendRequestId=null;$('#append-dialog').close();};
 $('#append-form').onsubmit=async e=>{
   e.preventDefault();

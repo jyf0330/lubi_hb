@@ -11,6 +11,7 @@
 .report-files a{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:center;min-width:180px;padding:9px 12px;border:1px solid #d7c8b8;border-radius:10px;color:inherit;text-decoration:none;background:#fffaf2}
 .report-files a span{font-size:22px;color:#986044}.report-files strong,.report-files small{overflow-wrap:anywhere}.report-files small{grid-column:2;color:#76685c}
 .report-files a:focus-visible{outline:3px solid #986044;outline-offset:3px}
+.task-files{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0;max-width:650px}.task-files:empty{display:none}.task-files a{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:center;min-width:180px;padding:9px 12px;border:1px solid #d7c8b8;border-radius:10px;color:inherit;text-decoration:none;background:#fffaf2}.task-files a span{font-size:22px;color:#986044}.task-files strong,.task-files small{overflow-wrap:anywhere}.task-files small{grid-column:2;color:#76685c}.task-files a:focus-visible{outline:3px solid #986044;outline-offset:3px}
 #heartbeat-images{max-width:100%;font-size:14px}
 #heartbeat-image-status{font-size:14px;overflow-wrap:anywhere}
 #heartbeat-archives{max-width:100%;font-size:14px}

@@ -7,8 +7,11 @@ import {
   type TaskStatus,
 } from '@/lib/task-domain';
 import {
+  MAX_FILE_DATA_LENGTH,
   MAX_IMAGE_DATA_LENGTH,
+  storeTaskFiles,
   storeTaskImages,
+  type EncodedFilePayload,
   type EncodedImagePayload,
 } from '@/lib/task-attachments';
 
@@ -18,12 +21,19 @@ const imageSchema = z.object({
   contentType: z.string().optional(),
 });
 
+const fileSchema = z.object({
+  name: z.string().max(160),
+  data: z.string().min(1).max(MAX_FILE_DATA_LENGTH),
+  contentType: z.string().max(120).optional(),
+});
+
 const actionSchema = z.object({
   action: z.enum(TASK_ACTIONS),
   actor: z.enum(MEMBERS),
   detail: z.string().trim().max(1200).optional(),
   deliverableUrl: z.union([z.url(), z.literal('')]).optional(),
   images: z.array(imageSchema).max(6).optional(),
+  files: z.array(fileSchema).max(6).optional(),
 });
 
 function todayInShanghai() {
@@ -246,6 +256,17 @@ export async function POST(
       (input.images ?? []) as EncodedImagePayload[],
       now,
     );
+    let fileStore;
+    try {
+      fileStore = await storeTaskFiles(
+        id,
+        (input.files ?? []) as EncodedFilePayload[],
+        now,
+      );
+    } catch (error) {
+      await imageStore.cleanup();
+      throw error;
+    }
     statements.push(
       ...imageStore.records.map((image) =>
         db
@@ -264,11 +285,29 @@ export async function POST(
             image.createdAt,
           ),
       ),
+      ...fileStore.records.map((file) =>
+        db
+          .prepare(
+            `INSERT INTO task_attachments
+             (id, task_id, name, content_type, size, storage_key, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            file.id,
+            file.taskId,
+            file.name,
+            file.contentType,
+            file.size,
+            file.storageKey,
+            file.createdAt,
+          ),
+      ),
     );
     try {
       await db.batch(statements);
     } catch (error) {
       await imageStore.cleanup();
+      await fileStore.cleanup();
       throw error;
     }
 
