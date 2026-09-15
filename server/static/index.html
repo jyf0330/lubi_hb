@@ -1,33 +1,120 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="ZHC 与 YWT 的每日任务、计时、交付和验收看板">
-  <title>西游团队生产看板</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <header class="topbar"><div class="mark">✦</div><div><h1>西游团队生产看板</h1><p>每日任务与交付状态</p></div><nav><a href="#overview">总览</a><a href="#board">任务</a><a href="#timeline">时间轴</a></nav><span id="today" class="date"></span></header>
-  <main id="overview">
-    <section class="summary">
-      <article class="brief"><small>AI 今日简报</small><strong id="brief-title">正在读取服务器记录</strong><p id="brief-copy">请稍候…</p></article>
-      <article class="metric"><span>今日计划</span><b id="planned">—</b><small>建议总量 12–14 点</small></article>
-      <article class="metric"><span>已完成</span><b id="done">—</b><small id="rate">完成率 —</small></article>
-      <article class="metric"><span>待验收</span><b id="review-count">—</b><small>请及时检查交付</small></article>
-      <article class="metric"><span>阻塞</span><b id="blocked-count">—</b><small>需求、程序、素材或权限</small></article>
-    </section>
-
-    <section class="panel"><header><div><small>LIVE STATUS</small><h2>此刻谁在做什么</h2></div><span class="live"><i></i>服务器记录</span></header><div id="people" class="people"></div></section>
-
-    <section class="panel" id="board"><header><div><small>TODAY BOARD</small><h2>今日任务看板</h2></div><span id="task-total"></span></header><div id="kanban" class="kanban"></div></section>
-
-    <div class="lower">
-      <section class="panel" id="timeline"><header><div><small>TIMELINE</small><h2>今日工作轨迹</h2></div></header><div class="timeline-head"><span>时间</span><span>负责人</span><span>任务与结果</span></div><div id="sessions"></div><p class="footnote">未记录的时间只显示“未记录”，不作为考勤判断。</p></section>
-      <aside class="panel"><header><div><small>REVIEW</small><h2>需要你处理</h2></div><b id="action-count" class="count">0</b></header><div id="actions" class="actions"></div></aside>
-    </div>
-  </main>
-  <template id="empty"><div class="empty">暂无记录</div></template>
-  <script src="app.js" defer></script>
-</body>
-</html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=boss-20260909"><link rel="stylesheet" href="report-images.css"></head>
+<body><header class="topbar"><div class="mark">☀</div><div><h1>露比工作室</h1><p>团队管理工作台</p></div><span id="today" class="date"></span><a class="employee-link" href="employee">姓名登录 · 我的信息 ↗</a></header>
+<main><div class="page-heading"><div><span class="eyebrow">掌握进展，及时支持</span><h2>团队工作，一目了然</h2></div><div class="refresh-tools"><span id="sync-status" role="status">正在读取最新记录…</span><button type="button" id="refresh-dashboard">刷新数据</button></div></div>
+<nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button></nav><p id="load-error" role="alert" hidden></p>
+<div id="overview" role="tabpanel" aria-labelledby="nav-overview"><section class="summary">
+        <article class="brief">
+          <small>今日概况</small
+          ><strong id="brief-title">正在读取服务器记录</strong>
+          <p id="brief-copy">请稍候…</p>
+        </article>
+        <article class="metric">
+          <span>未完成任务</span><b id="planned">—</b
+          ><small>包含跨天任务</small>
+        </article>
+        <article class="metric">
+          <span>今日审核得分</span><b id="done">—</b><small id="rate">以负责人审核打分为准</small>
+        </article>
+        <button type="button" class="metric metric-link" data-status-jump="待验收">
+          <span>待验收</span><b id="review-count">—</b
+          ><small>查看待验收任务 →</small>
+        </button>
+        <button type="button" class="metric metric-link" data-status-jump="阻塞">
+          <span>阻塞</span><b id="blocked-count">—</b
+          ><small>查看阻塞原因 →</small>
+        </button>
+      </section><div class="overview-layout"><section class="panel">
+        <header>
+          <div>
+            <small>人员状态</small>
+            <h2>此刻谁在做什么</h2>
+          </div>
+          <span class="live"><i></i>服务器记录</span>
+        </header>
+        <div id="people" class="people"></div>
+      </section><aside class="panel">
+          <header>
+            <div>
+              <small>待验收 · 阻塞 · 需修改</small>
+              <h2>优先关注</h2>
+            </div>
+            <b id="action-count" class="count">0</b>
+          </header>
+          <div id="actions" class="actions"></div>
+        </aside></div><details class="timer-details"><summary>专注与休息</summary><section id="pomodoro" class="pomodoro phase-off" aria-label="番茄钟">
+        <div class="pomodoro-mark" aria-hidden="true">◷</div>
+        <div class="pomodoro-copy">
+          <small>番茄钟</small>
+          <strong id="pomodoro-phase">非工作时段</strong>
+          <span>周一至周五 09:30–12:00 · 14:00–18:30</span>
+        </div>
+        <div class="pomodoro-time" aria-live="polite">
+          <span id="pomodoro-label">正在校准时间</span>
+          <strong id="pomodoro-countdown">--:--</strong>
+          <div class="pomodoro-progress"><i id="pomodoro-bar"></i></div>
+        </div>
+        <div class="pomodoro-actions">
+          <span id="rework-alert" class="rework-alert" hidden>有返工待处理</span>
+          <button id="enable-reminders" type="button">开启声音与通知</button>
+          <small>休息 / 开工 15 秒 · 返工音乐 30 秒</small>
+        </div>
+      </section></details></div>
+<section class="panel" id="board" role="tabpanel" aria-labelledby="nav-board" hidden>
+        <header>
+          <div>
+            <small>任务与交付</small>
+            <h2>今日任务看板</h2>
+          </div>
+          <span id="task-total"></span>
+        </header>
+        <div class="filters"><label>负责人<select id="owner-filter"><option value="">全部成员</option><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label><label>任务状态<select id="status-filter"><option value="">全部状态</option><option>今日待办</option><option>进行中</option><option>待验收</option><option>需修改</option><option>已完成</option><option>阻塞</option></select></label><label class="search-field">搜索任务<input id="task-search" type="search" placeholder="输入任务名称"></label><button id="clear-filters" type="button">清除筛选</button></div><div id="task-groups" aria-label="大任务汇总"></div><div id="kanban" class="kanban"></div>
+      </section><section class="panel" id="progress" role="tabpanel" aria-labelledby="nav-progress" hidden>
+        <header>
+          <div>
+            <small>过程记录</small>
+            <h2>30 分钟 hb 汇报</h2>
+          </div>
+          <span id="progress-count"></span>
+        </header>
+        <p class="panel-hint">先按人员查看；点击人员后，可展开今天每次汇报的具体时间、做了什么以及截图。</p>
+        <div id="progress-people" class="progress-people"></div>
+        <p class="footnote">
+          只在任务持续计时时提醒；暂停、阻塞和已结束任务不会催报。
+        </p>
+      </section><section class="panel" id="daily" role="tabpanel" aria-labelledby="nav-daily" hidden>
+        <header>
+          <div>
+            <small>每日交接</small>
+            <h2>今日总结与明日计划</h2>
+          </div>
+          <span id="report-count"></span>
+        </header>
+        <div class="daily-layout">
+          <div>
+            <h3 class="subhead">今日工作总结</h3>
+            <div id="reports" class="daily-grid"></div>
+          </div>
+          <div>
+            <h3 class="subhead">明日工作计划</h3>
+            <div id="tomorrow" class="daily-grid"></div>
+          </div>
+        </div>
+      </section><section class="panel" id="timeline" role="tabpanel" aria-labelledby="nav-timeline" hidden>
+          <header>
+            <div>
+              <small>计时记录</small>
+              <h2>今日工作轨迹</h2>
+            </div>
+          </header>
+          <div class="timeline-head">
+            <span>时间</span><span>负责人</span><span>任务与结果</span>
+          </div>
+          <div id="sessions"></div>
+          <p class="footnote">有效工时只计算周一至周五 09:30–12:00、14:00–18:30；午休、下班和周末自动暂停累计。</p>
+        </section>
+<section class="panel" id="owner-controls"><h2>管理员操作</h2><p id="owner-identity">余文浩登录后自动启用管理员权限。</p><form id="owner-login"><label>姓名<input name="name" required autocomplete="name" maxlength="20"></label><button>登录管理员</button></form><form id="insert-task" hidden><h3>临时插单</h3><label>员工<select name="assignee"><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label><label>任务名称<input name="title" required maxlength="120"></label><label>预期分钟（通常不超过 120）<input name="estimated_minutes" type="number" min="1" max="1440" value="120" required></label><label>验收要求<textarea name="acceptance_criteria" required maxlength="800"></textarea></label><button>插入任务，等待员工标高</button></form><p id="owner-notice" role="status"></p></section>
+<section class="panel"><h2>每日审核得分 · 近 7 天</h2><p>按审核通过日期计分；跨天任务保留。旧任务未打分不折算，点数不代表出勤时长。</p><div id="score-history" class="score-history"></div></section>
+<dialog id="task-detail"><div class="detail-heading"><h2>任务详情</h2><button id="close-detail" type="button">关闭</button></div><div id="detail-content"></div></dialog>
+<dialog id="progress-detail"><div class="detail-heading"><h2 id="progress-detail-title">汇报详情</h2><button id="close-progress-detail" type="button">关闭</button></div><div id="progress-detail-content"></div></dialog>
+</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js" defer></script><script src="app.js?v=work-hours-20260914" defer></script></body></html>

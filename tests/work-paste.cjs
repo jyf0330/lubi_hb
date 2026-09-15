@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('server/static/employee.js','utf8');
+const start=source.indexOf('function parseWorkText('),end=source.indexOf('function previewWork(',start);
+const parse=vm.runInNewContext(source.slice(start,end)+';parseWorkText');
+const valid='任务名称：制作登录界面\n任务类型：美术\n预计分钟：60\n交付内容：设计稿\n包含状态图\n验收标准：覆盖正常与错误状态';
+assert.equal(parse(valid).estimated_minutes,60);
+assert.equal(parse(valid).deliverable_expectation,'设计稿\n包含状态图');
+assert.equal(parse('```text\n'+valid+'\n```').title,'制作登录界面');
+assert.equal(parse(valid.replaceAll('：',':')).type,'美术');
+for(const invalid of ['',valid+'\n'+valid,valid.replace('预计分钟：60','预计分钟：5'),valid.replace('预计分钟：60','预计分钟：1小时'),valid.replace('任务类型：美术','任务类型：未知'),valid.replace('验收标准：覆盖正常与错误状态','验收标准：')])assert.throws(()=>parse(invalid));
+console.log('WORK_PASTE_TESTS_OK');

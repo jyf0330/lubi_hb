@@ -1,0 +1,25 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('server/static/employee.js','utf8');
+const nodes=new Map();const $=s=>{if(!nodes.has(s))nodes.set(s,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false});return nodes.get(s);};
+let request,fail=false;
+const sample={group:{title:'像素素材',deliverable_expectation:'PNG',acceptance_criteria:'风格一致'},stated_minutes:480,tasks:[60,180,120,60,60].map((m,i)=>({title:'阶段'+i,type:'美术',estimated_minutes:m,deliverable_expectation:'阶段成果',acceptance_criteria:'可打开'})),warnings:['补充尺寸']};
+const ctx=vm.createContext({$,crypto:require('node:crypto').webcrypto,esc:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),busy:false,user:'测试',notice:()=>{},storage:()=>{},tab:()=>{},refresh:async()=>{},showView:()=>{},api:async(path,data)=>{request={path,data};if(fail)throw Error('网络超时');return path==='plan'?{plan:structuredClone(sample)}:{message:'成功'};}});
+const parse=source.slice(source.indexOf('function parseWorkText'),source.indexOf('let workPlan='));
+const editor=source.slice(source.indexOf('let workPlan='),source.indexOf("$('#heartbeat').onsubmit"));
+vm.runInContext(parse+editor,ctx);
+(async()=>{
+  $('#work-text').value='素材工作预计8小时';
+  await $('#ai-plan').onclick();
+  assert.equal(request.path,'plan');assert.equal($('#confirm-plan').disabled,false);assert.match($('#plan-total').textContent,/480/);
+  const input={dataset:{field:'estimated_minutes'},value:'61',closest:()=>({dataset:{child:'0'}}),hasAttribute:()=>false};
+  $('#work-preview').oninput({target:input});assert.equal($('#confirm-plan').disabled,false);assert.doesNotMatch($('#plan-total').textContent,/不一致/);
+  input.value='60';$('#work-preview').oninput({target:input});assert.equal($('#confirm-plan').disabled,false);
+  const button={dataset:{merge:'1'},hasAttribute:k=>k==='data-merge'};$('#work-preview').onclick({target:{closest:()=>button}});
+  assert.equal(vm.runInContext('workPlan.tasks.length',ctx),4);assert.equal(vm.runInContext('workPlan.tasks[0].estimated_minutes',ctx),240);
+  fail=true;await $('#create').onsubmit({preventDefault(){}});const id=request.data.request_id;assert.equal($('#work-text').value,'素材工作预计8小时');assert.equal($('#confirm-plan').disabled,false);
+  fail=false;await $('#create').onsubmit({preventDefault(){}});assert.equal(request.data.request_id,id);assert.equal($('#work-text').value,'');assert.equal($('#confirm-plan').disabled,true);
+  $('#work-text').value='不丢失的原文';fail=true;await $('#ai-plan').onclick();assert.equal($('#work-text').value,'不丢失的原文');assert.match($('#work-validation').textContent,/超时/);
+  $('#manual-plan').onclick();assert.equal($('#confirm-plan').disabled,true);
+  vm.runInContext('workPlan.group.title="<img src=x onerror=alert(1)>";renderPlan()',ctx);assert.ok(!$('#work-preview').innerHTML.includes('<img'));assert.match($('#work-preview').innerHTML,/&lt;img/);
+  console.log('TASK_PLAN_EDITOR_OK');
+})().catch(e=>{console.error(e);process.exitCode=1;});
