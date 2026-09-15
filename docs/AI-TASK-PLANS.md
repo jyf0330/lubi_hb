@@ -43,11 +43,13 @@ API 依据：[DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mo
 
 本地预览使用临时数据库启动 `python3 server/app.py --port 4313 --database /tmp/board-preview/tasks.db`；不要用测试账户或测试任务写生产库。
 
-## 本次验证与发布准备（2026-09-09）
+## 本次验证与发布（2026-09-15）
 
 - 原有任务计划测试覆盖父任务时间与子任务时间不一致仍可登记，以及登记后补充小任务；旧文本解析与任务编辑器交互脚本通过；Python/JavaScript 语法检查通过。
 - 使用当前进程已有的 DeepSeek 环境配置真实调用成功：原文整理成 1 个大任务、5 个小任务，60/180/120/60/60 分钟，合计 480 分钟；包含缺失数量、尺寸等提示。未向正式任务库登记此测试。
-- 本地员工页面及脚本、样式、健康接口均返回 HTTP 200。尚未执行真实浏览器视觉验收。
-- 已只读核实线上 `game-team-board.service` 正在运行，目录 `/opt/game-team-board`，工作目录 `/var/lib/game-team-board`，配置文件 `/etc/game-team-board.env`；线上配置中尚无 DeepSeek API key。
-- 与线上现有文件比较，发布范围为 `app.py`、新增 `task_planner.py` 及 `static/employee.html`、`employee.js`、`employee.css`、`app.js`、`index.html`、`styles.css`。不发布仓库中的其他未提交改动。
-- 尚未更新线上服务，也未复制密钥。需授权发布及把当前环境的 DeepSeek 配置安全注入该服务后，备份数据库/替换文件/仅重启该服务，并复验线上页面与只生成草稿的 AI 接口。
+- 本地 29 项 Python 测试、旧文本兼容测试、Python/JavaScript 语法检查及 diff 检查通过；当前环境的 DeepSeek 最小化草稿调用成功。
+- 已发布 `task_planner.py` 与 `static/employee.js` 到 `/opt/game-team-board`；线上 `game-team-board.service` 重启后保持 active，健康接口返回 200。
+- 与线上现有文件比较，本次发布范围为 `task_planner.py` 与 `static/employee.js`；不发布仓库中的其他未提交改动。
+- 已将当前 DeepSeek 配置安全写入 `/etc/game-team-board.env`，仅保留 `DEEPSEEK_API_KEY` 已配置状态和 `DEEPSEEK_MODEL=deepseek-flash`；文件权限为 `600 root:root`，密钥未进入仓库、前端、日志或聊天。
+- 通过线上服务本机 API 与正式员工页面验证：登录、DeepSeek 草稿生成、页面“AI 整理（DeepSeek）”文案均成功；测试草稿未确认登记。
+- 发布前备份位于 `/opt/game-team-board/backups/`，本次备份标记为 `20260915-180722`；未发布仓库中无关的 `lib/task-attachments.ts` 与 `components/file-attachment-field.tsx`。
