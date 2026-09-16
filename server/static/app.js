@@ -310,7 +310,12 @@ async function refresh() {
           ? Math.min(100, Math.round((p.done / p.planned) * 100))
           : 0,
         checkin = checkinMeta(p.active);
-      return `<article class="person ${p.id.toLowerCase()}"><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.session.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日审核得分 ${p.done} 点</span><span>近 7 天 ${dashboardScores.filter(r=>r.assignee===p.id).reduce((n,r)=>n+r.points,0)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p></article>`;
+      const tag = p.active ? "button" : "article",
+        action = p.active
+          ? ` type="button" data-person-task-id="${esc(p.active.id)}" aria-label="查看 ${esc(names[p.id])} 的任务详情"`
+          : "",
+        actionClass = p.active ? " person-action" : "";
+      return `<${tag} class="person ${p.id.toLowerCase()}${actionClass}"${action}><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.active.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日审核得分 ${p.done} 点</span><span>近 7 天 ${dashboardScores.filter(r=>r.assignee===p.id).reduce((n,r)=>n+r.points,0)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p>${p.active ? '<span class="person-detail-link">查看任务详情 →</span>' : ""}</${tag}>`;
     })
     .join("");
   const progress = data.progress_updates || [];
@@ -445,6 +450,7 @@ function showDetail(id){
   document.querySelector('#task-detail').showModal();
 }
 for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 function showProgressDetail(assignee){
   const items = dashboardProgress.filter((item) => item.assignee === assignee);
