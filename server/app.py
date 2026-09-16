@@ -371,7 +371,7 @@ for definition in TOOLS:
         definition['inputSchema']['properties']['task_id'] = {'type':'string', 'format':'uuid'}
     if definition['name'] == 'work_finish_task':
         definition['inputSchema']['properties'].update({'employee_ai_points':{'type':'number','minimum':0,'maximum':10000}, 'employee_ai_reason':{'type':'string','maxLength':2000}})
-for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。')]:
+for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。'),('work_withdraw_submission','员工撤回自己尚未被处理的待验收提交，保留计时历史并恢复为暂停中的工作。')]:
     TOOLS.append({'name':name,'description':description,'inputSchema':{'type':'object','properties':{'task_id':{'type':'string','format':'uuid'}},'required':['task_id'],'additionalProperties':False}})
 
 
@@ -383,7 +383,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     timestamp = now_ms()
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
-        if name in ('owner_insert_task', 'owner_review_task', 'work_set_high_priority', 'work_unblock_task'):
+        if name in ('owner_insert_task', 'owner_review_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
             if attachments:
@@ -887,6 +887,20 @@ def dashboard_data() -> dict[str, object]:
             task.update(time_assessment(task["estimated_minutes"], int(task["actual_minutes"]), task.get("deadline_at"), assessed_at))
             if task["status"] == "进行中" and not task["is_paused"]:
                 task["checkin"] = checkin_status(db, task["assignee"], timestamp, task["id"])
+        if tasks:
+            task_ids = [task["id"] for task in tasks]
+            placeholders = ",".join("?" for _ in task_ids)
+            task_sessions = {}
+            for row in db.execute(
+                f"SELECT * FROM work_sessions WHERE task_id IN ({placeholders}) ORDER BY started_at DESC",
+                task_ids,
+            ).fetchall():
+                session = dict(row)
+                end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
+                session["recorded_minutes"] = working_minutes_between(int(session["started_at"]), end_ms)
+                task_sessions.setdefault(session["task_id"], []).append(session)
+            for task in tasks:
+                task["time_sessions"] = task_sessions.get(task["id"], [])
         sessions = [dict(row) for row in db.execute("SELECT ws.*, t.title, t.type FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id WHERE ws.started_at < ? AND (ws.ended_at IS NULL OR ws.ended_at > ?) ORDER BY ws.started_at DESC LIMIT 24", (day_start_ms(1), day_start_ms())).fetchall()]
         for session in sessions:
             end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
@@ -985,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "work_set_high_priority", "work_unblock_task","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")

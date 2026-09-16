@@ -63,6 +63,27 @@ def apply(db, member, name, args, stamp, event, today):
         db.execute("UPDATE tasks SET status='今日待办',blocked_reason=NULL,updated_at=? WHERE id=?", (stamp, task_id))
         event(db, task_id, member, '解除阻塞', status, '今日待办', None, stamp)
         return {'message': '已解除阻塞，可自行开始。'}
+    if name == 'work_withdraw_submission':
+        if member != task['assignee']:
+            raise ValueError('只能撤回自己的待验收任务。')
+        if status != '待验收':
+            raise ValueError('只有尚未处理的待验收任务可以撤回，请刷新。')
+        # Keep the finished session in the time history. The employee must
+        # explicitly resume before editing and submitting the work again.
+        db.execute("UPDATE work_sessions SET ended_at=?, end_reason='撤回验收' WHERE task_id=? AND ended_at IS NULL", (stamp, task_id))
+        changed = db.execute(
+            """UPDATE tasks SET status='进行中', is_paused=1, result_summary=NULL,
+               variance_reason=NULL, submitted_at=NULL, acceptance_result=NULL,
+               awarded_points=NULL, completed_at=NULL, employee_ai_points=NULL,
+               employee_ai_reason=NULL, platform_ai_points=NULL,
+               platform_ai_reason=NULL, updated_at=?
+               WHERE id=? AND assignee=? AND status='待验收'""",
+            (stamp, task_id, member),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务已变化，请刷新后重试。')
+        event(db, task_id, member, '员工撤回验收', status, '进行中', '已撤回待验收提交，任务暂停，等待员工重新开始并提交。', stamp)
+        return {'message': '已取消待验收提交；任务已暂停，请点击“继续”后重写完成说明并重新提交。'}
     if name == 'owner_review_task':
         if member != 'YWH':
             raise ValueError('只有负责人可以审核打分。')

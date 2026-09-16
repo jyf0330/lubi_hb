@@ -78,6 +78,7 @@ async function refresh(){
     if(t.status==='阻塞')buttons+=button('work_unblock_task','解除阻塞');
     if(['今日待办','需修改'].includes(t.status))buttons+=button('work_start_task','开始');
     if(t.status==='进行中'){buttons+=button(t.is_paused?'work_resume_task':'work_pause_task',t.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
+    if(t.status==='待验收')buttons+=button('work_withdraw_submission','取消待验收并重写');
     if(['今日待办','进行中','需修改'].includes(t.status))buttons+=button('work_block_task','遇到阻塞');
     return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskFileGallery(t.attachments)+'<div class="buttons">'+buttons+'</div></article>';
   };
@@ -394,6 +395,7 @@ $('#tasks').onclick=async e=>{
   const b=e.target.closest('button[data-action]');
   if(!b)return;
   selected={action:b.dataset.action,id:b.dataset.id};
+  if(selected.action==='work_withdraw_submission'&&!window.confirm('取消待验收后需要重新继续任务并提交，确定撤回吗？'))return;
   if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
   else await run(selected.action,{task_id:selected.id});
 };

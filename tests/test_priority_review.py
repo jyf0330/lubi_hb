@@ -89,6 +89,44 @@ class WorkflowTests(unittest.TestCase):
         with app.connect() as db:self.assertEqual(app.actual_minutes(db,task_id,stamp('2026-09-14T18:30:00')),25)
         self.assertEqual(self.task(task_id)['rework_count'],1)
 
+    def test_employee_can_withdraw_pending_submission_and_resubmit(self):
+        task_id = self.insert()
+        started = stamp('2026-09-14T09:30:00')
+        submitted = stamp('2026-09-14T09:45:00')
+        with patch.object(app, 'now_ms', return_value=started):
+            self.call('work_start_task', {'task_id': task_id})
+        with patch.object(app, 'now_ms', return_value=submitted):
+            self.call('work_finish_task', {'task_id': task_id, 'summary': '初次完成但需要重写'})
+
+        with patch.object(app, 'now_ms', return_value=stamp('2026-09-14T10:00:00')):
+            result = self.call('work_withdraw_submission', {'task_id': task_id})
+        self.assertTrue(result['ok'])
+        reopened = self.task(task_id)
+        self.assertEqual(reopened['status'], '进行中')
+        self.assertEqual(reopened['is_paused'], 1)
+        self.assertIsNone(reopened['submitted_at'])
+        self.assertIsNone(reopened['result_summary'])
+        with app.connect() as db:
+            self.assertEqual(app.actual_minutes(db, task_id, stamp('2026-09-14T18:30:00')), 15)
+            event_row = db.execute(
+                "SELECT from_status,to_status,event_type FROM task_events WHERE task_id=? AND event_type='员工撤回验收'",
+                (task_id,),
+            ).fetchone()
+            self.assertEqual(tuple(event_row), ('待验收', '进行中', '员工撤回验收'))
+
+        with self.assertRaises(ValueError):
+            self.call('work_withdraw_submission', {'task_id': task_id}, 'YWT')
+        self.call('work_resume_task', {'task_id': task_id})
+        self.call('work_finish_task', {'task_id': task_id, 'summary': '重写后的完成说明'})
+        self.assertEqual(self.task(task_id)['status'], '待验收')
+
+    def test_employee_cannot_withdraw_processed_submission(self):
+        task_id = self.insert()
+        self.submit(task_id)
+        self.call('owner_review_task', {'task_id': task_id, 'decision': 'accept', 'points': 2}, 'YWH')
+        with self.assertRaisesRegex(ValueError, '只有尚未处理'):
+            self.call('work_withdraw_submission', {'task_id': task_id})
+
     def test_working_minutes_use_weekday_windows_and_boundaries(self):
         cases = [
             ('2026-09-14T09:00:00', '2026-09-14T10:00:00', 30),
