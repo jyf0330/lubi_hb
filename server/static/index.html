@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=boss-20260909"><link rel="stylesheet" href="report-images.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=progress-review-20260916"><link rel="stylesheet" href="report-images.css"></head>
 <body><header class="topbar"><div class="mark">☀</div><div><h1>露比工作室</h1><p>团队管理工作台</p></div><span id="today" class="date"></span><a class="employee-link" href="employee">姓名登录 · 我的信息 ↗</a></header>
 <main><div class="page-heading"><div><span class="eyebrow">掌握进展，及时支持</span><h2>团队工作，一目了然</h2></div><div class="refresh-tools"><span id="sync-status" role="status">正在读取最新记录…</span><button type="button" id="refresh-dashboard">刷新数据</button></div></div>
 <nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button></nav><p id="load-error" role="alert" hidden></p>
@@ -30,10 +30,9 @@
             <small>人员状态</small>
             <h2>此刻谁在做什么</h2>
           </div>
-          <span class="live"><i></i>服务器记录 · 只读</span>
+          <span class="live"><i></i>服务器记录</span>
         </header>
-        <p class="panel-hint people-readonly-hint">只展示每位成员此刻的任务与计时状态，不进入任务详情。</p>
-        <div id="people" class="people" aria-label="人员状态，只读概览"></div>
+        <div id="people" class="people"></div>
       </section><aside class="panel">
           <header>
             <div>
@@ -78,7 +77,11 @@
           </div>
           <span id="progress-count"></span>
         </header>
-        <p class="panel-hint">先按人员查看；点击人员后，可展开今天每次汇报的具体时间、做了什么以及截图。</p>
+        <div class="progress-section-heading"><h3>待验收任务</h3><span id="progress-pending-count"></span></div>
+        <p class="panel-hint">已停止计时，等待负责人审核；点击任务可查看交付内容、验收标准并直接处理。</p>
+        <div id="progress-pending" class="progress-pending"></div>
+        <div class="progress-section-heading progress-reports-heading"><h3>30 分钟 hb 汇报</h3><span>先按人员查看</span></div>
+        <p class="panel-hint">点击人员后，可展开今天每次汇报的具体时间、做了什么以及截图。</p>
         <div id="progress-people" class="progress-people"></div>
         <p class="footnote">
           只在任务持续计时时提醒；暂停、阻塞和已结束任务不会催报。

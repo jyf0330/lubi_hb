@@ -307,6 +307,17 @@ async function refresh() {
   dashboardApiRoot = new URL("api/", location.href);
   document.querySelector("#progress-count").textContent =
     `今日 ${progress.length} 次 · ${new Set(progress.map((item) => item.assignee)).size} 人`;
+  const pendingAcceptance = tasks.filter((task) => task.status === "待验收");
+  document.querySelector("#progress-pending-count").textContent =
+    `${pendingAcceptance.length} 项`;
+  document.querySelector("#progress-pending").innerHTML = pendingAcceptance.length
+    ? pendingAcceptance
+        .map(
+          (task) =>
+            `<button type="button" class="action progress-pending-task" data-task-id="${esc(task.id)}"><span class="status-badge status-2">待验收</span><strong>${esc(task.title)}</strong><span>${esc(names[task.assignee] || task.assignee)} · ${esc(meta(task))}</span><span class="detail-link">查看详情 →</span></button>`,
+        )
+        .join("")
+    : '<div class="empty">当前没有待验收任务</div>';
   document.querySelector("#progress-people").innerHTML = ["ZHC", "YWT", "YWH"]
     .map((id) => {
       const own = progress.filter((item) => item.assignee === id);
@@ -406,7 +417,7 @@ function showDetail(id){
   appendReviewForm(t);
   document.querySelector('#task-detail').showModal();
 }
-for(const id of ['kanban','actions'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 function showProgressDetail(assignee){
   const items = dashboardProgress.filter((item) => item.assignee === assignee);

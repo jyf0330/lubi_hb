@@ -19,10 +19,14 @@
 
 /* Human-readable progress reports grouped by person. */
 .panel-hint { color: var(--muted); font-size: 14px; margin: -6px 0 16px; }
-.people-readonly-hint { margin-top: -8px; }
 .progress-people { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.progress-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 20px 0 8px; }
+.progress-section-heading h3 { font-size: 17px; }
+.progress-section-heading > span { color: var(--muted); font-size: 14px; }
+.progress-reports-heading { margin-top: 28px; }
+.progress-pending { display: grid; gap: 10px; }
+.progress-pending .action { margin-top: 0; }
 .progress-person { display: block; width: 100%; text-align: left; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fffefa; }
-.person { cursor: default; }
 .progress-person:hover { background: #f8efe2; border-color: #c7ad91; }
 .progress-person-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .progress-person-top small { display: block; color: var(--muted); font-size: 14px; }
