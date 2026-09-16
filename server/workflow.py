@@ -7,9 +7,14 @@ from zoneinfo import ZoneInfo
 
 
 def points(value):
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 10000:
-        raise ValueError('分数须为 0–10000 的有限数字。')
-    return round(value, 2)
+    if (
+        type(value) not in (int, float)
+        or not math.isfinite(value)
+        or not float(value).is_integer()
+        or not 0 <= value <= 10000
+    ):
+        raise ValueError('点数须为 0–10000 的整数，0 也算。')
+    return int(value)
 
 
 def migrate(db):

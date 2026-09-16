@@ -178,15 +178,44 @@ class WorkflowTests(unittest.TestCase):
         with app.connect() as db:db.execute('UPDATE tasks SET planned_date=? WHERE id=?',(app.date_string(-3),task_id))
         self.submit(task_id,employee_ai_points=8,employee_ai_reason='员工 AI 认为复杂')
         self.assertIsNone(self.task(task_id)['awarded_points'])
-        for invalid in [True,-1,float('nan'),float('inf'),'3']:
+        for invalid in [True,-1,3.5,float('nan'),float('inf'),'3']:
             with self.assertRaises(ValueError):self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':invalid},'YWH')
-        self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':3.5},'YWH')
+        self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':0},'YWH')
         with self.assertRaises(ValueError):self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':5},'YWH')
         data=app.dashboard_data()
         self.assertTrue(any(t['id']==task_id for t in data['tasks']))
         score=next(r for r in data['scores'] if r['date']==app.today() and r['assignee']=='ZHC')
-        self.assertEqual(score['points'],3.5)
-        with app.connect() as db:self.assertEqual(app.day_snapshot(db,'ZHC',app.today(),app.now_ms())['completed_points'],3.5)
+        self.assertEqual(score['points'],0)
+        self.assertEqual(score['completed_count'],1)
+        self.assertEqual(score['unscored_count'],0)
+        with app.connect() as db:self.assertEqual(app.day_snapshot(db,'ZHC',app.today(),app.now_ms())['completed_points'],0)
+
+    def test_employee_and_platform_suggestions_require_integer_points(self):
+        finish_schema = next(tool for tool in app.TOOLS if tool['name'] == 'work_finish_task')
+        self.assertEqual(finish_schema['inputSchema']['properties']['employee_ai_points']['type'], 'integer')
+        self.assertIn('step="1"', (app.STATIC / 'employee.html').read_text())
+        self.assertIn('最终点数（整数，0 也算）', (app.STATIC / 'app.js').read_text())
+
+        employee_task = self.insert()
+        self.call('work_start_task', {'task_id': employee_task})
+        with self.assertRaisesRegex(ValueError, '整数'):
+            self.call('work_finish_task', {
+                'task_id': employee_task,
+                'summary': '完成了要求的调整',
+                'employee_ai_points': 1.5,
+                'employee_ai_reason': '建议分说明',
+            })
+        self.call('work_finish_task', {
+            'task_id': employee_task,
+            'summary': '完成了要求的调整',
+            'employee_ai_points': 0,
+            'employee_ai_reason': '0 点也是有效建议',
+        })
+        self.assertEqual(self.task(employee_task)['employee_ai_points'], 0)
+
+        with patch.object(task_planner, 'generate_plan', side_effect=lambda source, member, prompt, validator: validator({'points': 2.5, 'reason': '非整数'})):
+            with self.assertRaisesRegex(ValueError, '整数'):
+                task_planner.generate_score('{"title":"工作"}', 'YWH')
 
     def test_terminal_block_prohibited_and_unblock(self):
         task_id=self.insert()

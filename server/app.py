@@ -370,7 +370,7 @@ for definition in TOOLS:
     if definition['name'] in ('work_pause_task', 'work_report_heartbeat', 'work_checkin_progress'):
         definition['inputSchema']['properties']['task_id'] = {'type':'string', 'format':'uuid'}
     if definition['name'] == 'work_finish_task':
-        definition['inputSchema']['properties'].update({'employee_ai_points':{'type':'number','minimum':0,'maximum':10000}, 'employee_ai_reason':{'type':'string','maxLength':2000}})
+        definition['inputSchema']['properties'].update({'employee_ai_points':{'type':'integer','minimum':0,'maximum':10000}, 'employee_ai_reason':{'type':'string','maxLength':2000}})
 for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。'),('work_withdraw_submission','员工撤回自己尚未被处理的待验收提交，保留计时历史并恢复为暂停中的工作。')]:
     TOOLS.append({'name':name,'description':description,'inputSchema':{'type':'object','properties':{'task_id':{'type':'string','format':'uuid'}},'required':['task_id'],'additionalProperties':False}})
 
