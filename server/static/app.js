@@ -46,6 +46,17 @@ function meta(t) {
   if (t.status === "已完成") return `验收通过 · ${timing(t)}`;
   return `${t.type} · 预计 ${t.estimated_minutes} 分钟${t.overdue ? " · 已延期" : ""}`;
 }
+function timeDetails(t) {
+  const sessions = Array.isArray(t.time_sessions) ? t.time_sessions : [];
+  if (!sessions.length) return "暂无计时记录";
+  return sessions
+    .map((session, index) => {
+      const end = session.ended_at ? clock(session.ended_at) : "进行中";
+      const reason = session.end_reason ? ` · ${session.end_reason}` : "";
+      return `第 ${sessions.length - index} 段：开始时间 ${clock(session.started_at)} · 结束时间 ${end}${reason}`;
+    })
+    .join("\n");
+}
 function checkinMeta(task) {
   const checkin = task?.checkin;
   if (!checkin?.active) return null;
@@ -329,7 +340,7 @@ async function refresh() {
       return `<button type="button" class="progress-person ${id.toLowerCase()}" data-progress-person="${id}">
         <span class="progress-person-top"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${latest ? `${own.length} 次汇报` : "今天暂无汇报"}</strong></span><span class="detail-link">${latest ? "查看详情 →" : "查看记录 →"}</span></span>
         <span class="progress-person-latest">${latest ? `<time>${clock(latest.created_at)}</time><b>${esc(latest.title)}</b><span>${esc(heartbeatText(latest))}</span>` : "点击查看该成员的详细工作记录"}</span>
-        <span class="progress-person-foot">${screenshotCount ? `截图 ${screenshotCount} 张` : "暂无截图"}${latest?.next_step ? ` · 下一步：${esc(latest.next_step)}` : ""}</span>
+        <span class="progress-person-foot">${screenshotCount ? `截图 ${screenshotCount} 张` : "暂无截图"}${latest?.next_step ? ` · 下一步：${esc(latest.next_step)}` : ""}${reportImagePreviewStrip(latest?.images, dashboardApiRoot)}</span>
       </button>`;
     })
     .join("");
@@ -365,13 +376,23 @@ async function refresh() {
     ["待验收", "需修改", "阻塞"].includes(t.status),
   );
   document.querySelector("#action-count").textContent = actions.length;
+  const taskById = new Map(actions.map((task) => [task.id, task]));
+  const groupedActionIds = new Set();
+  const groupedActions = dashboardGroups
+    .map((group) => ({
+      group,
+      tasks: group.tasks.map((child) => taskById.get(child.id)).filter(Boolean),
+    }))
+    .filter(({ tasks }) => tasks.length)
+    .map(({ group, tasks }) => {
+      tasks.forEach((task) => groupedActionIds.add(task.id));
+      return renderActionGroup(group, tasks);
+    });
+  const standaloneActions = actions
+    .filter((task) => !groupedActionIds.has(task.id))
+    .map((task) => renderActionCard(task));
   document.querySelector("#actions").innerHTML = actions.length
-    ? actions
-        .map(
-          (t) =>
-            `<button type="button" class="action" data-task-id="${esc(t.id)}"><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.status)}</span><strong>${esc(t.title)}</strong><span>${esc(names[t.assignee]||t.assignee)} · ${esc(meta(t))}</span><span class="detail-link">查看详情 →</span></button>`,
-        )
-        .join("")
+    ? [...groupedActions, ...standaloneActions].join("")
     : '<div class="empty">当前无需处理</div>';
 }
 let dashboardTasks = [];
@@ -396,6 +417,12 @@ document.querySelectorAll('[data-page]').forEach(button=>{
 });
 window.addEventListener('hashchange',()=>showPage(location.hash.slice(1)));
 showPage(location.hash.slice(1));
+function renderActionCard(t, nested=false){
+  return `<button type="button" class="action${nested?' action-child':''}" data-task-id="${esc(t.id)}"><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.status)}</span><strong>${esc(t.title)}</strong><span>${esc(names[t.assignee]||t.assignee)} · ${esc(meta(t))}</span><span class="detail-link">查看详情 →</span></button>`;
+}
+function renderActionGroup(group, tasks){
+  return `<article class="action action-group"><div class="action-group-heading"><span class="action-group-label">大任务</span><strong>${esc(group.title)}</strong><span>${esc(names[group.assignee]||group.assignee)} · ${esc(group.status)} · ${tasks.length} / ${group.total_count} 个小任务需处理</span></div><details class="action-group-details" open><summary>查看需处理的小任务</summary><div class="action-group-children">${tasks.map(t=>renderActionCard(t,true)).join('')}</div></details></article>`;
+}
 function renderTasks(){
   const owner=document.querySelector('#owner-filter').value,status=document.querySelector('#status-filter').value,search=document.querySelector('#task-search').value.trim().toLowerCase();
   const rank={'待验收':0,'阻塞':1,'需修改':2,'进行中':3,'今日待办':4,'已完成':5};
@@ -412,8 +439,8 @@ document.querySelectorAll('[data-status-jump]').forEach(button=>button.onclick=(
 function showDetail(id){
   const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
   let appendReason='';if(t.notes){try{appendReason=JSON.parse(t.notes).append_reason||'';}catch{}}
-  const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['用时',timing(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工 AI 建议',t.employee_ai_points==null?'未提供':t.employee_ai_points+' 点 · '+t.employee_ai_reason],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
-  document.querySelector('#detail-content').innerHTML=`<h3>${esc(t.title)}</h3><dl>${fields.filter(([,v])=>v).map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${taskFileGallery(t.attachments)}`;
+  const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['用时',timing(t)],['用时详情',timeDetails(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工 AI 建议',t.employee_ai_points==null?'未提供':t.employee_ai_points+' 点 · '+t.employee_ai_reason],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
+  document.querySelector('#detail-content').innerHTML=`<h3>${esc(t.title)}</h3><dl>${fields.filter(([,v])=>v).map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${taskAttachmentGallery(t.attachments)}`;
   appendReviewForm(t);
   document.querySelector('#task-detail').showModal();
 }
