@@ -218,6 +218,7 @@ function compressHeartbeatImage(file){
   // Keep the non-browser test/runtime fallback usable; production pages have Canvas and Image.
   if(typeof document==='undefined'||typeof Image==='undefined')return readHeartbeatImage(file).then(payload=>({payload,compressed:false}));
   return new Promise((resolve,reject)=>{
+    const originalMime=file.type||(/\.jpe?g$/i.test(file.name||'')?'image/jpeg':/\.webp$/i.test(file.name||'')?'image/webp':'image/png');
     const reader=new FileReader();
     reader.onerror=()=>reject(Error('无法读取图片：'+file.name));
     reader.onabort=()=>reject(Error('图片读取已取消。'));
@@ -244,7 +245,7 @@ function compressHeartbeatImage(file){
           const useCompressed=compressedBytes>0&&compressedBytes<originalBytes;
           const selected=useCompressed?dataUrl:original;
           const selectedName=useCompressed?file.name.replace(/\.[^.]+$/,'')+(mime==='image/webp'?'.webp':'.jpg'):file.name;
-          resolve({compressed:useCompressed,payload:{name:selectedName,data:selected.split(',')[1],contentType:useCompressed?mime:file.type||mime}});
+          resolve({compressed:useCompressed,payload:{name:selectedName,data:selected.split(',')[1],contentType:useCompressed?mime:originalMime}});
         }catch(error){reject(error);}
       };
       image.src=String(reader.result);
