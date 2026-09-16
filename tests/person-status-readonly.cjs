@@ -11,6 +11,7 @@ const peoplePanel = html.match(
 );
 assert.ok(peoplePanel, "人员状态面板应存在");
 assert.match(app, /data-person-task-id="\$\{esc\(p\.active\.id\)\}"/);
+assert.match(app, /clock\(p\.session\.started_at\)/);
 assert.match(app, /class="person-detail-link">查看任务详情 →/);
 assert.match(app, /showDetail\(card\.dataset\.personTaskId\)/);
 
