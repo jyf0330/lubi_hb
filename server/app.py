@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
 from mcp_protocol import handle_post
 from task_planner import generate_score, generate_plan, validate_plan, text as plan_text
@@ -1035,7 +1035,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(HTTPStatus.NO_CONTENT, b"", "text/plain")
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+        download = parse_qs(parsed_url.query).get("download") == ["1"]
         if path in ("/employee", "/employee/", "/employee.html"):
             self.send_bytes(200, (STATIC / "employee.html").read_bytes(), "text/html; charset=utf-8")
         elif path in ("/employee.js", "/employee.css", "/employee/employee.js", "/employee/employee.css"):
@@ -1075,7 +1077,10 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
             if row:
                 safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
-                self.send_bytes(200, row["body"], row["content_type"], {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"})
+                extra_headers = None
+                if download or not row["content_type"].startswith("image/"):
+                    extra_headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"}
+                self.send_bytes(200, row["body"], row["content_type"], extra_headers)
             else:
                 self.send_json(404, {"error": "附件不存在或无权下载。"})
         elif path.startswith("/api/report-images/"):
@@ -1084,10 +1089,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "请先登录员工页面查看图片。"})
                 return
             with connect() as db:
-                row = db.execute("SELECT i.body,i.content_type FROM progress_images i JOIN progress_updates p ON p.id=i.progress_id WHERE i.id=? AND (p.assignee=? OR ?='YWH')",
+                row = db.execute("SELECT i.body,i.content_type,i.name FROM progress_images i JOIN progress_updates p ON p.id=i.progress_id WHERE i.id=? AND (p.assignee=? OR ?='YWH')",
                                  (path.rsplit("/", 1)[-1], member, member)).fetchone()
             if row:
-                self.send_bytes(200, row["body"], row["content_type"])
+                extra_headers = None
+                if download:
+                    safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
+                    extra_headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"}
+                self.send_bytes(200, row["body"], row["content_type"], extra_headers)
             else:
                 self.send_json(404, {"error": "图片不存在或无权查看。"})
         elif path.startswith("/api/report-files/"):

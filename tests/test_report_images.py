@@ -83,10 +83,42 @@ class ReportImagesTests(unittest.TestCase):
             self.assertEqual(body, PNG)
             self.assertEqual(headers['Content-Type'], 'image/png')
             self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+            downloaded_body, downloaded_headers = self.get(url + '?download=1', cookie)
+            self.assertEqual(downloaded_body, PNG)
+            self.assertIn('attachment', downloaded_headers['Content-Disposition'])
+            self.assertIn('%E8%BF%9B%E5%B1%95.png', downloaded_headers['Content-Disposition'])
         for cookie, status in (('', 401), (self.other, 404)):
             with self.assertRaises(HTTPError) as caught:
                 self.get(url, cookie)
             self.assertEqual(caught.exception.code, status)
+
+    def test_task_image_can_be_viewed_and_downloaded(self):
+        self.post('action', {
+            'action': 'work_finish_task',
+            'args': {
+                'task_id': self.task,
+                'summary': '提交带截图的完成说明',
+                'attachments': [{
+                    'name': '任务截图.png',
+                    'contentType': 'image/png',
+                    'data': base64.b64encode(PNG).decode(),
+                }],
+            },
+        }, self.worker)
+        with app.connect() as db:
+            attachment_id = db.execute(
+                "SELECT id FROM task_attachments WHERE task_id=? ORDER BY rowid DESC LIMIT 1",
+                (self.task,),
+            ).fetchone()[0]
+        url = '/api/task-files/' + attachment_id
+        body, headers = self.get(url, self.worker)
+        self.assertEqual(body, PNG)
+        self.assertEqual(headers['Content-Type'], 'image/png')
+        self.assertNotIn('Content-Disposition', headers)
+        body, headers = self.get(url + '?download=1', self.worker)
+        self.assertEqual(body, PNG)
+        self.assertIn('attachment', headers['Content-Disposition'])
+        self.assertIn('%E4%BB%BB%E5%8A%A1%E6%88%AA%E5%9B%BE.png', headers['Content-Disposition'])
 
     def test_invalid_batch_rolls_back_and_text_still_works(self):
         payload = self.payload()
