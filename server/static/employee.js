@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
+let user = null, items = [], groupCache = [], busy = false, selected = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(text, error=false){$('#notice').textContent=text;$('#notice').className=error?'error':'';}
@@ -95,7 +95,7 @@ async function run(action,args){
   finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);if(workPlan)checkPlan();else $('#confirm-plan').disabled=true;}
 }
 $('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{name:new FormData(e.target).get('name')});await refresh();notice('欢迎回来，'+user+'。');}catch(err){notice(err.message,true);}};
-$('#logout').onclick=async()=>{if(busy)return;await api('logout',{});clearHeartbeatImages();$('#heartbeat').reset();user=null;draftOwner=null;workPlan=null;planRequestId=null;appendGroupId=null;appendRequestId=null;if($('#append-dialog').open)$('#append-dialog').close();$('#work-text').value='';renderPlan();$('#workspace').hidden=true;$('#welcome').hidden=false;$('#logout').hidden=true;$('#identity').textContent='我的工作台';};
+$('#logout').onclick=async()=>{if(busy)return;await api('logout',{});clearHeartbeatImages();clearActionImages();actionFiles=[];renderTaskFiles();$('#heartbeat').reset();user=null;draftOwner=null;workPlan=null;planRequestId=null;appendGroupId=null;appendRequestId=null;if($('#append-dialog').open)$('#append-dialog').close();$('#work-text').value='';renderPlan();$('#workspace').hidden=true;$('#welcome').hidden=false;$('#logout').hidden=true;$('#identity').textContent='我的工作台';};
 $('#draft').oninput=e=>{storage('todo:'+user,e.target.value);$('#draft-saved').textContent='已保存在此浏览器';};
 function parseWorkText(text){
   const labels={'任务名称':'title','任务类型':'type','预计分钟':'estimated_minutes','交付内容':'deliverable_expectation','验收标准':'acceptance_criteria'};
@@ -210,7 +210,7 @@ function readHeartbeatImage(file){
     const reader=new FileReader();
     reader.onerror=()=>reject(Error('无法读取图片：'+file.name));
     reader.onabort=()=>reject(Error('图片读取已取消。'));
-    reader.onload=()=>resolve({name:file.name,data:String(reader.result).split(',')[1]});
+    reader.onload=()=>resolve({name:file.name,data:String(reader.result).split(',')[1],contentType:file.type||'image/png'});
     reader.readAsDataURL(file);
   });
 }
@@ -244,7 +244,7 @@ function compressHeartbeatImage(file){
           const useCompressed=compressedBytes>0&&compressedBytes<originalBytes;
           const selected=useCompressed?dataUrl:original;
           const selectedName=useCompressed?file.name.replace(/\.[^.]+$/,'')+(mime==='image/webp'?'.webp':'.jpg'):file.name;
-          resolve({compressed:useCompressed,payload:{name:selectedName,data:selected.split(',')[1]}});
+          resolve({compressed:useCompressed,payload:{name:selectedName,data:selected.split(',')[1],contentType:useCompressed?mime:file.type||mime}});
         }catch(error){reject(error);}
       };
       image.src=String(reader.result);
@@ -345,12 +345,33 @@ function renderTaskFiles(){
   $('#action-file-status').textContent=actionFiles.length?'已选 '+actionFiles.length+' / 6 个文件 · '+(total/1024/1024).toFixed(1)+' / 40 MB':'';
 }
 function formatFileSize(size){return size<1024*1024?Math.max(1,Math.round(size/1024))+' KB':(size/1024/1024).toFixed(1)+' MB';}
+function clearActionImages(){actionImages.forEach(image=>URL.revokeObjectURL(image.url));actionImages=[];$('#action-images').value='';renderActionImages();}
+function renderActionImages(){
+  $('#action-image-previews').innerHTML=actionImages.map((image,index)=>'<figure><img src="'+esc(image.url)+'" alt="'+esc(image.file.name)+'"><figcaption>'+esc(image.file.name)+'</figcaption><button type="button" data-remove-action-image="'+index+'" aria-label="移除 '+esc(image.file.name)+'">移除</button></figure>').join('');
+  const total=actionImages.reduce((sum,image)=>sum+image.file.size,0);
+  $('#action-image-status').textContent=actionImages.length?'已选 '+actionImages.length+' / 6 张 · '+(total/1024/1024).toFixed(1)+' / 12 MB · 提交时自动压缩':'';
+}
+function addActionImages(files){
+  if(busy)return;
+  let error='';
+  const totalImages=actionImages.reduce((sum,image)=>sum+image.file.size,0)+files.reduce((sum,file)=>sum+file.size,0);
+  const totalFiles=totalImages+actionFiles.reduce((sum,item)=>sum+item.file.size,0);
+  if(files.length+actionImages.length+actionFiles.length>6)error='截图和附件合计最多上传 6 个。';
+  else if(files.some(file=>!['image/png','image/jpeg','image/webp'].includes(file.type)&&!/\.(png|jpe?g|webp)$/i.test(file.name||'')))error='截图仅支持 PNG、JPG 和 WebP。';
+  else if(files.some(file=>!file.size||file.size>4*1024*1024))error='单张截图不能超过 4 MB。';
+  else if(totalImages>12*1024*1024)error='截图合计不能超过 12 MB。';
+  else if(totalFiles>40*1024*1024)error='截图和附件合计不能超过 40 MB。';
+  if(error){$('#action-image-status').textContent=error;return;}
+  actionImages.push(...files.map(file=>({file,url:URL.createObjectURL(file)})));renderActionImages();
+}
+$('#action-images').onchange=e=>{const files=[...e.target.files];e.target.value='';addActionImages(files);};
+$('#action-image-previews').onclick=e=>{const button=e.target.closest('[data-remove-action-image]');if(!button||busy)return;const [image]=actionImages.splice(Number(button.dataset.removeActionImage),1);if(image)URL.revokeObjectURL(image.url);renderActionImages();};
 function addTaskFiles(files){
   if(busy)return;
   let error='';
-  if(files.length+actionFiles.length>6)error='每次最多上传 6 个文件。';
+  if(files.length+actionFiles.length+actionImages.length>6)error='截图和附件合计最多上传 6 个。';
   else if(files.some(file=>!file.size||file.size>20*1024*1024))error='文件不能为空，且单个不能超过 20 MB。';
-  else if([...files,...actionFiles.map(item=>item.file)].reduce((sum,file)=>sum+file.size,0)>40*1024*1024)error='文件合计不能超过 40 MB。';
+  else if([...files,...actionFiles.map(item=>item.file),...actionImages.map(image=>image.file)].reduce((sum,file)=>sum+file.size,0)>40*1024*1024)error='截图和附件合计不能超过 40 MB。';
   if(error){$('#action-file-status').textContent=error;return;}
   actionFiles.push(...files.map(file=>({file})));renderTaskFiles();
 }
@@ -372,11 +393,11 @@ $('#tasks').onclick=async e=>{
   const b=e.target.closest('button[data-action]');
   if(!b)return;
   selected={action:b.dataset.action,id:b.dataset.id};
-  if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
+  if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
   else await run(selected.action,{task_id:selected.id});
 };
-$('#cancel').onclick=()=>$('#action-dialog').close();
-$('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const note=$('#action-file-status');try{note.textContent=actionFiles.length?'正在读取附件，请稍候…':'';const attachments=await Promise.all(actionFiles.map(item=>readTaskFile(item.file)));const args={task_id:selected.id,attachments,...(selected.action==='work_finish_task'?{summary:d.detail,...(d.employee_ai_points!==''?{employee_ai_points:Number(d.employee_ai_points),employee_ai_reason:d.employee_ai_reason}:{})}:{reason:d.detail})};if(await run(selected.action,args)){actionFiles=[];renderTaskFiles();$('#action-dialog').close();}}catch(error){note.textContent=error.message;notice(error.message,true);}};
+$('#cancel').onclick=()=>{clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').close();};
+$('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const note=$('#action-file-status');try{note.textContent=actionImages.length||actionFiles.length?'正在读取截图和附件，请稍候…':'';const prepared=await Promise.all(actionImages.map(({file})=>compressHeartbeatImage(file)));const files=await Promise.all(actionFiles.map(item=>readTaskFile(item.file)));const attachments=[...prepared.map(image=>image.payload),...files];const args={task_id:selected.id,attachments,...(selected.action==='work_finish_task'?{summary:d.detail,...(d.employee_ai_points!==''?{employee_ai_points:Number(d.employee_ai_points),employee_ai_reason:d.employee_ai_reason}:{})}:{reason:d.detail})};if(await run(selected.action,args)){clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').close();}}catch(error){note.textContent=error.message;notice(error.message,true);}};
 $('#append-cancel').onclick=()=>{appendGroupId=null;appendRequestId=null;$('#append-dialog').close();};
 $('#append-form').onsubmit=async e=>{
   e.preventDefault();
