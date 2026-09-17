@@ -445,7 +445,7 @@ function showDetail(id){
   const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
   let appendReason='';if(t.notes){try{appendReason=JSON.parse(t.notes).append_reason||'';}catch{}}
   const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['用时',timing(t)],['用时详情',timeDetails(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工 AI 建议',t.employee_ai_points==null?'未提供':t.employee_ai_points+' 点 · '+t.employee_ai_reason],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
-  document.querySelector('#detail-content').innerHTML=`<h3>${esc(t.title)}</h3><dl>${fields.filter(([,v])=>v).map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${taskAttachmentGallery(t.attachments)}`;
+  document.querySelector('#detail-content').innerHTML=`<h3>${esc(t.title)}</h3><dl>${fields.filter(([,v])=>v).map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${taskAttachmentGallery(t.attachments, dashboardApiRoot)}`;
   appendReviewForm(t);
   document.querySelector('#task-detail').showModal();
 }

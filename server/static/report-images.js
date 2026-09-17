@@ -39,27 +39,27 @@ function reportFileGallery(files, apiRoot) {
   }).join('') + '</div>';
 }
 
-function taskImageGallery(files) {
+function taskImageGallery(files, apiRoot) {
   const images = (files || []).filter(file => String(file.content_type || '').startsWith('image/'));
   if (!images.length) return '';
   return '<div class="report-images task-images" aria-label="任务图片">' + images.map(image => {
-    const url = '/api/task-files/' + encodeURIComponent(image.id);
+    const url = new URL('task-files/' + encodeURIComponent(image.id), apiRoot).href;
     const downloadUrl = galleryDownloadUrl(url);
     return '<figure class="report-image-card"><a class="report-image-preview" href="'+escapeGallery(url)+'" target="_blank" rel="noopener" title="查看图片：'+escapeGallery(image.name)+'"><img src="'+escapeGallery(url)+'" alt="'+escapeGallery(image.name)+'" loading="lazy"><span>'+escapeGallery(image.name)+'</span></a><a class="report-image-download" href="'+escapeGallery(downloadUrl)+'" download title="下载图片：'+escapeGallery(image.name)+'">下载图片</a></figure>';
   }).join('') + '</div>';
 }
 
-function taskFileGallery(files) {
+function taskFileGallery(files, apiRoot) {
   const documents = (files || []).filter(file => !String(file.content_type || '').startsWith('image/'));
   if (!documents.length) return '';
   return '<div class="task-files">' + documents.map(file => {
-    const url = '/api/task-files/' + encodeURIComponent(file.id);
+    const url = new URL('task-files/' + encodeURIComponent(file.id), apiRoot).href;
     const size = file.size ? (file.size / 1024 / 1024).toFixed(1) + ' MB' : '';
     return '<a href="'+escapeGallery(url)+'" download title="下载附件：'+escapeGallery(file.name)+'"><span aria-hidden="true">▣</span><strong>'+escapeGallery(file.name)+'</strong><small>'+escapeGallery(size)+'</small></a>';
   }).join('') + '</div>';
 }
 
 // oxlint-disable-next-line no-unused-vars -- consumed by employee.js and app.js.
-function taskAttachmentGallery(files) {
-  return taskImageGallery(files) + taskFileGallery(files);
+function taskAttachmentGallery(files, apiRoot) {
+  return taskImageGallery(files, apiRoot) + taskFileGallery(files, apiRoot);
 }

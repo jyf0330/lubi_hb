@@ -5,6 +5,7 @@ let heartbeatImages = [];
 let heartbeatArchives = [];
 let user = null, items = [], groupCache = [], busy = false, selected = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
+const taskApiRoot = new URL('../', apiBase);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(text, error=false){$('#notice').textContent=text;$('#notice').className=error?'error':'';}
 async function api(path, data){
@@ -55,7 +56,7 @@ function renderPersonal(data){
   $('#owner-dashboard').href=new URL('../..',apiBase).href;
   $('#personal-summary').innerHTML='<div><small>今日审核得分</small><strong>'+todayPoints+' 点</strong></div><div><small>近 7 天得分</small><strong>'+total+' 点</strong></div><div><small>等待审核</small><strong>'+data.tasks.filter(t=>t.status==='待验收').length+' 项</strong></div><div><small>当前高优先</small><strong>'+esc(high?.title||'暂无')+'</strong></div>';
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
-  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
+  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+new Date(p.created_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
 }
 async function refresh(){
@@ -80,7 +81,7 @@ async function refresh(){
     if(t.status==='进行中'){buttons+=button(t.is_paused?'work_resume_task':'work_pause_task',t.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
     if(t.status==='待验收')buttons+=button('work_withdraw_submission','取消待验收并重写');
     if(['今日待办','进行中','需修改'].includes(t.status))buttons+=button('work_block_task','遇到阻塞');
-    return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(t.attachments)+'<div class="buttons">'+buttons+'</div></article>';
+    return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(t.attachments,taskApiRoot)+'<div class="buttons">'+buttons+'</div></article>';
   };
   const groups = data.groups || [];
   groupCache = groups;
