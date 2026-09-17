@@ -112,10 +112,7 @@
               <h2>今日工作轨迹</h2>
             </div>
           </header>
-          <div class="timeline-head">
-            <span>时间</span><span>负责人</span><span>任务与结果</span>
-          </div>
-          <div id="sessions"></div>
+          <div id="sessions" class="timeline-columns" aria-label="今日成员工作轨迹"></div>
           <p class="footnote">有效工时只计算周一至周五 09:30–12:00、14:00–18:30；午休、下班和周末自动暂停累计。</p>
         </section>
 <section class="panel" id="owner-controls"><h2>管理员操作</h2><p id="owner-identity">余文浩登录后自动启用管理员权限。</p><form id="owner-login"><label>姓名<input name="name" required autocomplete="name" maxlength="20"></label><button>登录管理员</button></form><form id="insert-task" hidden><h3>临时插单</h3><label>员工<select name="assignee"><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label><label>任务名称<input name="title" required maxlength="120"></label><label>预期分钟（通常不超过 120）<input name="estimated_minutes" type="number" min="1" max="1440" value="120" required></label><label>验收要求<textarea name="acceptance_criteria" required maxlength="800"></textarea></label><button>插入任务，等待员工标高</button></form><p id="owner-notice" role="status"></p></section>

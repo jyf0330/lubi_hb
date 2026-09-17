@@ -368,15 +368,25 @@ async function refresh() {
       return `<article class="daily-card"><div class="daily-title"><strong>${esc(names[id])}</strong><span>${list.length} 项</span></div>${list.length ? `<ul>${list.map((t) => `<li><b>${esc(t.title)}</b><small>${esc(t.type)} · ${t.estimated_minutes} 分钟</small></li>`).join("")}</ul>` : "<p>尚未安排明日任务</p>"}</article>`;
     })
     .join("");
-  document.querySelector("#sessions").innerHTML = sessions.length
-    ? sessions
-        .slice(0, 12)
-        .map(
-          (s) =>
-            `<div class="session"><time>${clock(s.started_at)}</time><span>${esc(names[s.assignee]||s.assignee)}</span><strong>${esc(s.title)} · ${s.ended_at ? `有效工时 ${s.recorded_minutes} 分钟` : `进行中 · 已记录 ${s.recorded_minutes} 分钟`}</strong></div>`,
-        )
-        .join("")
-    : '<div class="empty">今日暂无计时记录</div>';
+  document.querySelector("#sessions").innerHTML = ["ZHC", "YWT"]
+    .map((id) => {
+      const ownSessions = sessions.filter((session) => session.assignee === id);
+      return `<section class="timeline-column ${id.toLowerCase()}">
+        <header class="timeline-column-heading">
+          <span class="timeline-person-mark">${id}</span>
+          <div><strong>${esc(names[id] || id)}</strong><span>${ownSessions.length} 条记录</span></div>
+        </header>
+        <div class="timeline-session-list">${ownSessions.length
+          ? ownSessions
+              .map(
+                (s) =>
+                  `<article class="timeline-session ${s.ended_at ? "done" : "active"}"><div class="timeline-session-meta"><time>${clock(s.started_at)}</time><span>${s.ended_at ? "已结束" : "进行中"}</span></div><div class="timeline-task"><span></span><strong>${esc(s.title)} · ${s.ended_at ? `有效工时 ${s.recorded_minutes} 分钟` : `已记录 ${s.recorded_minutes} 分钟`}</strong></div></article>`,
+              )
+              .join("")
+          : '<div class="empty-timeline">今日暂无计时记录</div>'}</div>
+      </section>`;
+    })
+    .join("");
   const actions = tasks.filter((t) =>
     ["待验收", "需修改", "阻塞"].includes(t.status),
   );
