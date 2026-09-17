@@ -13,6 +13,7 @@ let reminderSoundEnabled = false;
 let previousPomodoroPhase = null;
 let pendingReworkKey = null;
 let reviewFiles = [];
+const DEFAULT_REWORK_REASON = "时间不符需自述";
 const esc = (v) =>
   String(v ?? "").replace(
     /[&<>'"]/g,
@@ -28,6 +29,22 @@ const clock = (ms) =>
     hour12: false,
     timeZone: "Asia/Shanghai",
   }).format(new Date(ms));
+const shanghaiDate = (ms) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(new Date(ms))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+const formatPoints = (points) =>
+  Number(points).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const duration = (ms) => {
   const m = Math.max(0, Math.floor(ms / 60000));
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
@@ -296,7 +313,7 @@ async function refresh() {
   document.querySelector("#planned").textContent = `${tasks.filter(t=>t.status!=='已完成').length} 项`;
   document.querySelector("#done").textContent = `${done} 点`;
   document.querySelector("#rate").textContent =
-    "以负责人审核打分为准";
+    "点击查看任务明细 →";
   document.querySelector("#review-count").textContent = `${waiting.length} 项`;
   document.querySelector("#blocked-count").textContent = `${blocked.length} 项`;
   document.querySelector("#brief-title").textContent =
@@ -462,6 +479,25 @@ function showDetail(id){
 for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
+function showScoreDetail(){
+  const tasks=dashboardTasks
+    .filter(t=>t.status==='已完成'&&t.completed_at&&shanghaiDate(t.completed_at)===dashboardDate)
+    .sort((a,b)=>Number(b.completed_at)-Number(a.completed_at));
+  const total=tasks.reduce((sum,t)=>sum+(t.awarded_points==null?0:Number(t.awarded_points)),0);
+  const scored=tasks.filter(t=>t.awarded_points!=null).length;
+  const grouped=['ZHC','YWT','YWH'].map(member=>({
+    member,
+    tasks:tasks.filter(t=>t.assignee===member),
+  })).filter(group=>group.tasks.length);
+  const groups=grouped.map(group=>{
+    const points=group.tasks.reduce((sum,t)=>sum+(t.awarded_points==null?0:Number(t.awarded_points)),0);
+    return `<section class="score-person"><header><h3>${esc(names[group.member]||group.member)}</h3><strong>${group.tasks.length} 项 · ${formatPoints(points)} 点</strong></header><ul>${group.tasks.map(t=>`<li><span><b>${esc(t.title)}</b><small>${clock(t.completed_at)} 审核通过${t.awarded_points==null?' · 尚未记录最终分数':''}</small></span><strong class="score-value">${t.awarded_points==null?'未打分':formatPoints(t.awarded_points)+' 点'}</strong></li>`).join('')}</ul></section>`;
+  }).join('');
+  document.querySelector('#score-detail-content').innerHTML=`<div class="score-summary"><div><small>今日审核任务</small><strong>${tasks.length} 项</strong></div><div><small>已记录分数</small><strong>${scored} / ${tasks.length} 项</strong></div><div><small>今日总得分</small><strong>${formatPoints(total)} 点</strong></div></div>${groups||'<div class="empty">今天还没有审核通过的任务。</div>'}`;
+  document.querySelector('#score-detail').showModal();
+}
+document.querySelector('[data-score-details]').onclick=showScoreDetail;
+document.querySelector('#close-score-detail').onclick=()=>document.querySelector('#score-detail').close();
 function showProgressDetail(assignee){
   const items = dashboardProgress.filter((item) => item.assignee === assignee);
   document.querySelector('#progress-detail-title').textContent = `${names[assignee] || assignee} · 今日汇报`;
@@ -510,12 +546,12 @@ function appendReviewForm(t){
   if(t.status!=='待验收')return;
   const container=document.querySelector('#detail-content');
   if(!ownerLoggedIn){container.insertAdjacentHTML('beforeend','<p>请先在页面下方登录负责人身份，再进行审核。</p>');return;}
-  container.insertAdjacentHTML('beforeend','<form id="review-form"><label>最终点数（整数，0 也算）<input name="points" type="number" min="0" max="10000" step="1" placeholder="由你最终打分"></label><label>审核说明（退回必填）<textarea name="reason" maxlength="1200"></textarea></label><label for="review-files">审核附件（可选）</label><input id="review-files" type="file" accept="*/*" multiple><p class="panel-hint">可附验收截图、修改要求示例等证据。最多 6 个，单个不超过 20 MB，合计不超过 40 MB。</p><div id="review-file-previews" class="archive-previews"></div><p id="review-file-status" role="status"></p><div class="review-actions"><button type="button" id="platform-score">生成平台 AI 建议</button><button name="decision" value="accept">通过并计分</button><button name="decision" value="rework">退回修改</button></div><p id="review-notice" role="status"></p></form>');
+  container.insertAdjacentHTML('beforeend','<form id="review-form"><label>最终点数（整数，0 也算）<input name="points" type="number" min="0" max="10000" step="1" placeholder="由你最终打分"></label><label>审核说明（退回必填）<textarea name="reason" maxlength="1200" placeholder="时间不符需自述"></textarea></label><label for="review-files">审核附件（可选）</label><input id="review-files" type="file" accept="*/*" multiple><p class="panel-hint">可附验收截图、修改要求示例等证据。最多 6 个，单个不超过 20 MB，合计不超过 40 MB。</p><div id="review-file-previews" class="archive-previews"></div><p id="review-file-status" role="status"></p><div class="review-actions"><button type="button" id="platform-score">生成平台 AI 建议</button><button name="decision" value="accept">通过并计分</button><button name="decision" value="rework">退回修改</button></div><p id="review-notice" role="status"></p></form>');
   reviewFiles=[];renderReviewFiles();
   document.querySelector('#review-files').onchange=event=>{const files=[...event.target.files];event.target.value='';addReviewFiles(files);};
   document.querySelector('#review-file-previews').onclick=event=>{const button=event.target.closest('[data-remove-review-file]');if(!button)return;reviewFiles.splice(Number(button.dataset.removeReviewFile),1);renderReviewFiles();};
   const form=document.querySelector('#review-form');
-  form.onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(form)),decision=e.submitter.value;const note=document.querySelector('#review-notice');if(decision==='accept'&&data.points===''){note.textContent='请填写最终点数，可以为 0。';return;}form.querySelectorAll('button').forEach(b=>b.disabled=true);try{document.querySelector('#review-file-status').textContent=reviewFiles.length?'正在读取附件，请稍候…':'';const attachments=await Promise.all(reviewFiles.map(item=>readReviewFile(item.file)));await ownerApi('action',{action:'owner_review_task',args:{task_id:t.id,decision,points:Number(data.points),reason:data.reason,attachments}});reviewFiles=[];document.querySelector('#task-detail').close();await loadDashboard();}catch(error){note.textContent=error.message;}finally{form.querySelectorAll('button').forEach(b=>b.disabled=false);}};
+  form.onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(form)),decision=e.submitter.value;const note=document.querySelector('#review-notice');if(decision==='accept'&&data.points===''){note.textContent='请填写最终点数，可以为 0。';return;}const reason=decision==='rework'&&!data.reason.trim()?DEFAULT_REWORK_REASON:data.reason;form.querySelectorAll('button').forEach(b=>b.disabled=true);try{document.querySelector('#review-file-status').textContent=reviewFiles.length?'正在读取附件，请稍候…':'';const attachments=await Promise.all(reviewFiles.map(item=>readReviewFile(item.file)));await ownerApi('action',{action:'owner_review_task',args:{task_id:t.id,decision,points:Number(data.points),reason,attachments}});reviewFiles=[];document.querySelector('#task-detail').close();await loadDashboard();}catch(error){note.textContent=error.message;}finally{form.querySelectorAll('button').forEach(b=>b.disabled=false);}};
   document.querySelector('#platform-score').onclick=async e=>{const button=e.currentTarget;button.disabled=true;const note=document.querySelector('#review-notice');note.textContent='正在生成建议，不影响你的最终打分…';try{const r=await ownerApi('score',{task_id:t.id});note.textContent='平台 AI 建议：'+r.points+' 点。'+r.reason;await loadDashboard();}catch(error){note.textContent=error.message;}finally{button.disabled=false;}};
 }
 function readReviewFile(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(Error('无法读取文件：'+file.name));reader.onload=()=>resolve({name:file.name,data:typeof reader.result==='string'?reader.result.split(',')[1]:'',contentType:file.type||'application/octet-stream'});reader.readAsDataURL(file);});}

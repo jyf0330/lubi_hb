@@ -35,6 +35,21 @@
 .score-history { overflow-x: auto; }
 .score-history table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .score-history th, .score-history td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+.score-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.score-summary > div { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; }
+.score-summary small { display: block; color: var(--muted); font-size: 13px; }
+.score-summary strong { display: block; margin-top: 4px; font-size: 22px; }
+.score-person { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
+.score-person > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.score-person > header strong { color: var(--cyan); white-space: nowrap; }
+.score-person ul { list-style: none; padding: 0; margin: 0; }
+.score-person li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
+.score-person li span { min-width: 0; }
+.score-person li b, .score-person li small { display: block; overflow-wrap: anywhere; }
+.score-person li small { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.score-value { white-space: nowrap; color: var(--green); }
+.metric-link#score-metric { cursor: pointer; }
+@media(max-width:680px){.score-summary{grid-template-columns:1fr}.score-person > header{align-items:flex-start;flex-direction:column;gap:3px}.score-person li{align-items:flex-start;flex-direction:column;gap:4px}}
 
 /* Human-readable progress reports grouped by person. */
 .panel-hint { color: var(--muted); font-size: 14px; margin: -6px 0 16px; }
