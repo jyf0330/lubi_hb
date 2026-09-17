@@ -56,3 +56,14 @@
 @media(max-width:900px){.progress-people{grid-template-columns:1fr}}
 [hidden] { display: none !important; }
 .action-group{background:#fbf5ea;border-color:#d9c4a4}.action-group-heading{display:grid;gap:2px}.action-group-heading strong{font-size:17px;margin:4px 0}.action-group-heading>span:last-child{font-size:14px;color:var(--muted)}.action-group-label{font-size:13px;color:#94603e;font-weight:700;letter-spacing:.04em}.action-group-details{margin-top:12px;border-top:1px solid #e5d8c8;padding-top:10px}.action-group-details>summary{cursor:pointer;color:var(--cyan);font-size:14px}.action-group-children{display:grid;gap:8px;margin-top:8px;padding-left:12px;border-left:3px solid #e1cba9}.action-child{margin-top:0;padding:12px;background:#fffdf8}.action-child strong{font-size:15px;margin:6px 0}.action-child .detail-link{margin-top:6px}
+
+/* Keep the secondary-dialog close action available while its details scroll. */
+dialog .detail-heading {
+  position: sticky;
+  top: -24px;
+  z-index: 1;
+  margin: -24px -24px 20px;
+  padding: 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
