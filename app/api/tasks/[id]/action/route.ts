@@ -27,6 +27,8 @@ const fileSchema = z.object({
   contentType: z.string().max(120).optional(),
 });
 
+const DEFAULT_REWORK_REASON = '时间不符需自述';
+
 const actionSchema = z.object({
   action: z.enum(TASK_ACTIONS),
   actor: z.enum(MEMBERS),
@@ -63,6 +65,10 @@ export async function POST(
   try {
     const { id } = await context.params;
     const input = actionSchema.parse(await request.json());
+    const actionDetail =
+      input.action === 'rework' && !input.detail
+        ? DEFAULT_REWORK_REASON
+        : input.detail;
     const task = await getTaskById(id);
     if (!task)
       return Response.json(
@@ -80,7 +86,7 @@ export async function POST(
       input.actor,
     );
 
-    if (['submit', 'rework', 'block'].includes(input.action) && !input.detail) {
+    if (['submit', 'rework', 'block'].includes(input.action) && !actionDetail) {
       throw new Error('请填写本次操作的说明。');
     }
 
@@ -169,7 +175,7 @@ export async function POST(
             `UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?,
              submitted_at = ?, updated_at = ? WHERE id = ?`,
           )
-          .bind(input.detail, now, now, id),
+          .bind(actionDetail, now, now, id),
       );
       if (input.deliverableUrl) {
         statements.push(
@@ -191,7 +197,7 @@ export async function POST(
             `UPDATE tasks SET status = '已完成', acceptance_result = ?, completed_at = ?,
              updated_at = ? WHERE id = ?`,
           )
-          .bind(input.detail || '验收通过', now, now, id),
+          .bind(actionDetail || '验收通过', now, now, id),
       );
     } else if (input.action === 'rework') {
       nextStatus = '需修改';
@@ -203,7 +209,7 @@ export async function POST(
             `UPDATE tasks SET status = '需修改', acceptance_result = ?,
              rework_count = rework_count + 1, updated_at = ? WHERE id = ?`,
           )
-          .bind(input.detail, now, id),
+          .bind(actionDetail, now, id),
       );
     } else if (input.action === 'block') {
       nextStatus = '阻塞';
@@ -224,7 +230,7 @@ export async function POST(
             `UPDATE tasks SET status = '阻塞', is_paused = 0, blocked_reason = ?,
              updated_at = ? WHERE id = ?`,
           )
-          .bind(input.detail, now, id),
+          .bind(actionDetail, now, id),
       );
     } else {
       nextStatus = '今日待办';
@@ -247,7 +253,7 @@ export async function POST(
         eventType,
         task.status,
         nextStatus,
-        input.detail || null,
+        actionDetail || null,
         now,
       ),
     );

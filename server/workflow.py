@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+DEFAULT_REWORK_REASON = '时间不符需自述'
+
 
 def points(value):
     if (
@@ -96,6 +98,8 @@ def apply(db, member, name, args, stamp, event, today):
             raise ValueError('任务已处理或不在待验收状态，请刷新。')
         decision = args.get('decision')
         reason = str(args.get('reason') or '').strip()
+        if decision == 'rework' and not reason:
+            reason = DEFAULT_REWORK_REASON
         if decision not in ('accept', 'rework') or len(reason) > 1200 or (decision == 'rework' and not reason):
             raise ValueError('请选择审核结果；退回时须填写修改要求（最多 1200 字）。')
         score = points(args.get('points')) if decision == 'accept' else None

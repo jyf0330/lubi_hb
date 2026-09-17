@@ -89,6 +89,12 @@ class WorkflowTests(unittest.TestCase):
         with app.connect() as db:self.assertEqual(app.actual_minutes(db,task_id,stamp('2026-09-14T18:30:00')),25)
         self.assertEqual(self.task(task_id)['rework_count'],1)
 
+    def test_rework_uses_default_reason_when_empty(self):
+        task_id = self.insert()
+        self.submit(task_id)
+        self.call('owner_review_task', {'task_id': task_id, 'decision': 'rework', 'reason': ''}, 'YWH')
+        self.assertEqual(self.task(task_id)['acceptance_result'], '时间不符需自述')
+
     def test_employee_can_withdraw_pending_submission_and_resubmit(self):
         task_id = self.insert()
         started = stamp('2026-09-14T09:30:00')

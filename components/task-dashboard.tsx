@@ -117,6 +117,8 @@ const emptyDraft: CreateDraft = {
   testSevereBugs: 0,
 };
 
+const DEFAULT_REWORK_REASON = '时间不符需自述';
+
 const actionCopy: Record<
   TaskAction,
   { label: string; detail?: string; placeholder?: string }
@@ -377,7 +379,7 @@ export function TaskDashboard({
     if (withDetail) {
       setSelectedTask(task);
       setPendingAction(action);
-      setDetail('');
+      setDetail(action === 'rework' ? DEFAULT_REWORK_REASON : '');
       setDeliverableUrl('');
       releaseImageDrafts(actionImages);
       setActionImages([]);
