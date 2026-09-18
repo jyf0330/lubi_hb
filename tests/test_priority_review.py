@@ -40,7 +40,7 @@ class WorkflowTests(unittest.TestCase):
 
     def submit(self, task_id, **extra):
         self.call('work_start_task', {'task_id':task_id})
-        self.call('work_finish_task', {'task_id':task_id, 'summary':'完成了要求的调整', **extra})
+        self.call('work_finish_task', {'task_id':task_id, 'summary':'完成了要求的调整', 'employee_points': 0, **extra})
 
     def test_single_priority_replacement_and_restart(self):
         first,second=self.insert(),self.insert('第二次插单')
@@ -81,11 +81,11 @@ class WorkflowTests(unittest.TestCase):
     def test_review_wait_not_counted_rework_preserves_time(self):
         task_id=self.insert()
         with patch.object(app,'now_ms',return_value=stamp('2026-09-14T09:30:00')):self.call('work_start_task',{'task_id':task_id})
-        with patch.object(app,'now_ms',return_value=stamp('2026-09-14T09:40:00')):self.call('work_finish_task',{'task_id':task_id,'summary':'初次完成'})
+        with patch.object(app,'now_ms',return_value=stamp('2026-09-14T09:40:00')):self.call('work_finish_task',{'task_id':task_id,'summary':'初次完成','employee_points':0})
         with app.connect() as db:self.assertEqual(app.actual_minutes(db,task_id,stamp('2026-09-14T18:30:00')),10)
         self.call('owner_review_task',{'task_id':task_id,'decision':'rework','reason':'补充细节'},'YWH')
         with patch.object(app,'now_ms',return_value=stamp('2026-09-14T14:00:00')):self.call('work_start_task',{'task_id':task_id})
-        with patch.object(app,'now_ms',return_value=stamp('2026-09-14T14:15:00')):self.call('work_finish_task',{'task_id':task_id,'summary':'修改完成'})
+        with patch.object(app,'now_ms',return_value=stamp('2026-09-14T14:15:00')):self.call('work_finish_task',{'task_id':task_id,'summary':'修改完成','employee_points':0})
         with app.connect() as db:self.assertEqual(app.actual_minutes(db,task_id,stamp('2026-09-14T18:30:00')),25)
         self.assertEqual(self.task(task_id)['rework_count'],1)
 
@@ -102,7 +102,7 @@ class WorkflowTests(unittest.TestCase):
         with patch.object(app, 'now_ms', return_value=started):
             self.call('work_start_task', {'task_id': task_id})
         with patch.object(app, 'now_ms', return_value=submitted):
-            self.call('work_finish_task', {'task_id': task_id, 'summary': '初次完成但需要重写'})
+            self.call('work_finish_task', {'task_id': task_id, 'summary': '初次完成但需要重写', 'employee_points': 0})
 
         with patch.object(app, 'now_ms', return_value=stamp('2026-09-14T10:00:00')):
             result = self.call('work_withdraw_submission', {'task_id': task_id})
@@ -123,7 +123,7 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.call('work_withdraw_submission', {'task_id': task_id}, 'YWT')
         self.call('work_resume_task', {'task_id': task_id})
-        self.call('work_finish_task', {'task_id': task_id, 'summary': '重写后的完成说明'})
+        self.call('work_finish_task', {'task_id': task_id, 'summary': '重写后的完成说明', 'employee_points': 0})
         self.assertEqual(self.task(task_id)['status'], '待验收')
 
     def test_employee_cannot_withdraw_processed_submission(self):
@@ -182,40 +182,54 @@ class WorkflowTests(unittest.TestCase):
     def test_scoring_is_manual_cross_day_and_idempotent(self):
         task_id=self.insert()
         with app.connect() as db:db.execute('UPDATE tasks SET planned_date=? WHERE id=?',(app.date_string(-3),task_id))
-        self.submit(task_id,employee_ai_points=8,employee_ai_reason='员工 AI 认为复杂')
+        self.submit(task_id,employee_points=8,employee_reason='员工自评认为复杂')
         self.assertIsNone(self.task(task_id)['awarded_points'])
         for invalid in [True,-1,3.5,float('nan'),float('inf'),'3']:
             with self.assertRaises(ValueError):self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':invalid},'YWH')
-        self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':0},'YWH')
+        self.call('owner_review_task',{'task_id':task_id,'decision':'accept'},'YWH')
+        self.assertEqual(self.task(task_id)['awarded_points'],8)
         with self.assertRaises(ValueError):self.call('owner_review_task',{'task_id':task_id,'decision':'accept','points':5},'YWH')
         data=app.dashboard_data()
         self.assertTrue(any(t['id']==task_id for t in data['tasks']))
         score=next(r for r in data['scores'] if r['date']==app.today() and r['assignee']=='ZHC')
-        self.assertEqual(score['points'],0)
+        self.assertEqual(score['points'],8)
         self.assertEqual(score['completed_count'],1)
         self.assertEqual(score['unscored_count'],0)
-        with app.connect() as db:self.assertEqual(app.day_snapshot(db,'ZHC',app.today(),app.now_ms())['completed_points'],0)
+        with app.connect() as db:self.assertEqual(app.day_snapshot(db,'ZHC',app.today(),app.now_ms())['completed_points'],8)
 
-    def test_employee_and_platform_suggestions_require_integer_points(self):
+        override_task = self.insert('需要覆盖分数')
+        self.submit(override_task, employee_points=8)
+        self.call('owner_review_task', {'task_id': override_task, 'decision': 'accept', 'points': 5}, 'YWH')
+        self.assertEqual(self.task(override_task)['awarded_points'], 5)
+
+    def test_employee_self_score_is_required_and_integer(self):
         finish_schema = next(tool for tool in app.TOOLS if tool['name'] == 'work_finish_task')
-        self.assertEqual(finish_schema['inputSchema']['properties']['employee_ai_points']['type'], 'integer')
+        self.assertEqual(finish_schema['inputSchema']['properties']['employee_points']['type'], 'integer')
+        self.assertIn('employee_points', finish_schema['inputSchema']['required'])
         self.assertIn('step="1"', (app.STATIC / 'employee.html').read_text())
-        self.assertIn('最终点数（整数，0 也算）', (app.STATIC / 'app.js').read_text())
+        self.assertIn('员工自评分（必填', (app.STATIC / 'employee.html').read_text())
+        self.assertIn('通过验收', (app.STATIC / 'app.js').read_text())
+        self.assertIn('覆盖分数', (app.STATIC / 'app.js').read_text())
 
         employee_task = self.insert()
         self.call('work_start_task', {'task_id': employee_task})
+        with self.assertRaisesRegex(ValueError, '必须填写员工自评分'):
+            self.call('work_finish_task', {
+                'task_id': employee_task,
+                'summary': '完成了要求的调整',
+            })
         with self.assertRaisesRegex(ValueError, '整数'):
             self.call('work_finish_task', {
                 'task_id': employee_task,
                 'summary': '完成了要求的调整',
-                'employee_ai_points': 1.5,
-                'employee_ai_reason': '建议分说明',
+                'employee_points': 1.5,
+                'employee_reason': '自评分说明',
             })
         self.call('work_finish_task', {
             'task_id': employee_task,
             'summary': '完成了要求的调整',
-            'employee_ai_points': 0,
-            'employee_ai_reason': '0 点也是有效建议',
+            'employee_points': 0,
+            'employee_reason': '0 点也是有效自评分',
         })
         self.assertEqual(self.task(employee_task)['employee_ai_points'], 0)
 

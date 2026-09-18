@@ -98,6 +98,7 @@ class ReportImagesTests(unittest.TestCase):
             'args': {
                 'task_id': self.task,
                 'summary': '提交带截图的完成说明',
+                'employee_points': 0,
                 'attachments': [{
                     'name': '任务截图.png',
                     'contentType': 'image/png',

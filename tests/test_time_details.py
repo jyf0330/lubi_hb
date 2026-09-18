@@ -44,7 +44,7 @@ class DashboardTimeDetailsTests(unittest.TestCase):
         with patch.object(app, "now_ms", return_value=started):
             app.call_tool("ZHC", "work_start_task", {"task_id": task_id})
         with patch.object(app, "now_ms", return_value=ended):
-            app.call_tool("ZHC", "work_finish_task", {"task_id": task_id, "summary": "已完成"})
+            app.call_tool("ZHC", "work_finish_task", {"task_id": task_id, "summary": "已完成", "employee_points": 0})
 
         with patch.object(app, "now_ms", return_value=ended):
             task = next(task for task in app.dashboard_data()["tasks"] if task["id"] == task_id)

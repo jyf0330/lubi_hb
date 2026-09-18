@@ -107,7 +107,7 @@ class McpIntegration(unittest.TestCase):
         self.tool("work_pause_task")
         self.assertTrue(self.tool("work_report_heartbeat", {"status": "正常推进"})["result"]["isError"])
         self.tool("work_resume_task", {"task_id": task})
-        done = self.tool("work_finish_task", {"task_id": task, "summary": "完成隔离验证"})["result"]["structuredContent"]
+        done = self.tool("work_finish_task", {"task_id": task, "summary": "完成隔离验证", "employee_points": 0})["result"]["structuredContent"]
         self.assertEqual(done["status"], "待验收")
         self.assertIn("submitted_at", done)
         remaining = self.tool("work_get_active")["result"]["structuredContent"]["tasks"]

@@ -102,7 +102,17 @@ def apply(db, member, name, args, stamp, event, today):
             reason = DEFAULT_REWORK_REASON
         if decision not in ('accept', 'rework') or len(reason) > 1200 or (decision == 'rework' and not reason):
             raise ValueError('请选择审核结果；退回时须填写修改要求（最多 1200 字）。')
-        score = points(args.get('points')) if decision == 'accept' else None
+        if decision == 'accept':
+            # The employee's self-score is the normal approval value. The
+            # owner only supplies points when explicitly overriding it.
+            submitted_score = args.get('points')
+            if submitted_score is None:
+                submitted_score = task['employee_ai_points']
+            if submitted_score is None:
+                raise ValueError('该任务缺少员工自评分，不能直接通过验收。')
+            score = points(submitted_score)
+        else:
+            score = None
         target = '已完成' if decision == 'accept' else '需修改'
         db.execute("UPDATE tasks SET status=?,awarded_points=?,completed_at=?,acceptance_result=?,priority=CASE WHEN ?='已完成' THEN '普通' ELSE priority END,rework_count=rework_count+?,updated_at=? WHERE id=?", (target, score, stamp if score is not None else None, reason, target, int(decision=='rework'), stamp, task_id))
         event(db, task_id, member, '审核通过' if decision=='accept' else '退回修改', status, target, json.dumps({'points':score,'reason':reason}, ensure_ascii=False), stamp)

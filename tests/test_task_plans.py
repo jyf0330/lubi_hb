@@ -86,7 +86,7 @@ class Plans(unittest.TestCase):
         with self.assertRaises(ValueError): app.call_tool('YWT', 'work_start_task', {'task_id': child})
         app.call_tool('ZHC', 'work_start_task', {'task_id': child})
         with app.connect() as db: self.assertEqual(app.task_groups(db, 'ZHC')[0]['status'], '进行中')
-        app.call_tool('ZHC', 'work_finish_task', {'task_id': child, 'summary': '已完成规划', 'deliverable_urls': []})
+        app.call_tool('ZHC', 'work_finish_task', {'task_id': child, 'summary': '已完成规划', 'employee_points': 0, 'deliverable_urls': []})
         with app.connect() as db:
             db.execute("update tasks set status='待验收'")
             self.assertEqual(app.task_groups(db, 'ZHC')[0]['status'], '待验收')

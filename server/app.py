@@ -359,7 +359,7 @@ TOOLS = [
     {"name": "work_pause_task", "description": "暂停当前任务并关闭当前计时段。", "inputSchema": {"type": "object", "properties": {"reason": {"type": "string"}}, "additionalProperties": False}},
     {"name": "work_resume_task", "description": "继续一项已暂停的任务。", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}}, "required": ["task_id"], "additionalProperties": False}},
     {"name": "work_block_task", "description": "记录需求、程序、素材或权限等阻塞原因。", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string"}}, "required": ["task_id", "reason"], "additionalProperties": False}},
-    {"name": "work_finish_task", "description": "结束计时、保存总结和交付链接并提交待验收。实际耗时与预估偏差由服务器自动计算。", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}, "summary": {"type": "string"}, "deliverable_urls": {"type": "array", "items": {"type": "string", "format": "uri"}}, "variance_reason": {"type": "string", "enum": VARIANCE_REASONS, "description": "仅在明显超出预估时选填。"}}, "required": ["task_id", "summary"], "additionalProperties": False}},
+    {"name": "work_finish_task", "description": "结束计时、保存完成总结、员工自评分和交付链接并提交待验收。实际耗时与预估偏差由服务器自动计算。", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "format": "uuid"}, "summary": {"type": "string"}, "employee_points": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "员工提交时必须填写的自评分；0 也算有效。"}, "employee_reason": {"type": "string", "maxLength": 2000, "description": "员工自评分说明，可选。"}, "deliverable_urls": {"type": "array", "items": {"type": "string", "format": "uri"}}, "variance_reason": {"type": "string", "enum": VARIANCE_REASONS, "description": "仅在明显超出预估时选填。"}}, "required": ["task_id", "summary", "employee_points"], "additionalProperties": False}},
     {"name": "work_get_day_summary", "description": "读取员工今日任务、计时、完成情况和已安排的明日任务，供 AI 起草今日总结与明日计划。", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}},
     {"name": "work_submit_daily_report", "description": "员工一次确认后保存今日总结，并把确认的明日任务放入明日任务池。", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string", "minLength": 2, "maxLength": 2000}, "tomorrow_tasks": {"type": "array", "maxItems": 8, "items": {"type": "object", "required": ["title", "type", "estimated_minutes"], "properties": {"title": {"type": "string"}, "type": {"type": "string", "enum": TASK_TYPES}, "estimated_minutes": {"type": "integer", "minimum": 15, "maximum": 1440}, "deliverable_expectation": {"type": "string"}, "acceptance_criteria": {"type": "string"}, "deadline_at": {"type": "string"}, "dependency_titles": {"type": "array", "items": {"type": "string"}}, "parallel_group": {"type": "string"}}}}}, "required": ["summary", "tomorrow_tasks"], "additionalProperties": False}},
     {"name": "work_report_heartbeat", "description": "记录员工明确提交的 30 分钟 hb 进展，服务器返回累计工时和下一次汇报节点。", "inputSchema": {"type": "object", "properties": {"status": {"type": "string", "enum": HEARTBEAT_STATUSES}, "detail": {"type": "string", "maxLength": 500}, "next_step": {"type": "string", "maxLength": 500}, "blocker": {"type": "string", "maxLength": 500}, "progress_percent": {"type": "integer", "minimum": 0, "maximum": 100}}, "required": ["status"], "additionalProperties": False}},
@@ -369,8 +369,6 @@ TOOLS = [
 for definition in TOOLS:
     if definition['name'] in ('work_pause_task', 'work_report_heartbeat', 'work_checkin_progress'):
         definition['inputSchema']['properties']['task_id'] = {'type':'string', 'format':'uuid'}
-    if definition['name'] == 'work_finish_task':
-        definition['inputSchema']['properties'].update({'employee_ai_points':{'type':'integer','minimum':0,'maximum':10000}, 'employee_ai_reason':{'type':'string','maxLength':2000}})
 for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。'),('work_withdraw_submission','员工撤回自己尚未被处理的待验收提交，保留计时历史并恢复为暂停中的工作。')]:
     TOOLS.append({'name':name,'description':description,'inputSchema':{'type':'object','properties':{'task_id':{'type':'string','format':'uuid'}},'required':['task_id'],'additionalProperties':False}})
 
@@ -594,14 +592,19 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             if len(summary) < 2:
                 raise ValueError("请填写完成总结。")
             attachments = task_files.decode_files(args.get("attachments", []))
-            employee_score = args.get('employee_ai_points')
-            employee_reason = str(args.get('employee_ai_reason') or '').strip()
-            if employee_score is not None:
-                employee_score = workflow.points(employee_score)
-                if not employee_reason or len(employee_reason) > 2000:
-                    raise ValueError('员工 AI 建议分须附 1–2000 字说明。')
-            elif employee_reason:
-                raise ValueError('请同时填写员工 AI 建议分。')
+            if 'employee_points' in args:
+                employee_score = args.get('employee_points')
+                employee_reason = str(args.get('employee_reason') or '').strip()
+            elif 'employee_ai_points' in args:
+                # Accept the old internal name for existing MCP callers while
+                # exposing the employee-facing self-score contract above.
+                employee_score = args.get('employee_ai_points')
+                employee_reason = str(args.get('employee_ai_reason') or '').strip()
+            else:
+                raise ValueError('提交任务时必须填写员工自评分，0 也算有效。')
+            employee_score = workflow.points(employee_score)
+            if len(employee_reason) > 2000:
+                raise ValueError('员工自评分说明不能超过 2000 字。')
             db.execute('UPDATE tasks SET employee_ai_points=?,employee_ai_reason=?,platform_ai_points=NULL,platform_ai_reason=NULL WHERE id=?', (employee_score, employee_reason or None, task_id))
             urls = args.get("deliverable_urls") or []
             if not isinstance(urls, list) or len(urls) > 12:
