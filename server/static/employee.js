@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [];
+let user = null, items = [], groupCache = [], busy = false, selected = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null;
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const taskApiRoot = new URL('../', apiBase);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -39,6 +39,43 @@ document.querySelectorAll('[data-view]').forEach(button=>{
 window.addEventListener('hashchange',()=>showView(location.hash.slice(1)));
 showView(location.hash.slice(1));
 function storage(key,value){try{if(value!==undefined)localStorage.setItem(key,value);else return localStorage.getItem(key);}catch{return null;}}
+function addDays(date, days){const value=new Date(date);value.setUTCDate(value.getUTCDate()+days);return value;}
+function isoDate(date){return date.toISOString().slice(0,10);}
+function todoDates(baseDate){
+  const base=new Date(`${baseDate}T12:00:00Z`);
+  const day=base.getUTCDay();
+  const monday=addDays(base,day===0?-6:1-day);
+  return [0,1,2,3,4,7].map(offset=>{
+    const value=addDays(monday,offset);
+    return {value:isoDate(value),day:value.getUTCDay()};
+  });
+}
+function todoStorageKey(date){return 'todo:'+user+':'+date;}
+function renderTodoDates(baseDate, migrateLegacy=false){
+  const select=$('#todo-date');
+  if(!select||!user)return;
+  todoBaseDate=baseDate;
+  const options=todoDates(baseDate);
+  const available=new Set(options.map(option=>option.value));
+  const fallback=options.find(option=>option.value===baseDate)?.value||options[5].value||options[0].value;
+  const selected=available.has(todoDate)?todoDate:fallback;
+  select.innerHTML=options.map(option=>{
+    const date=new Date(`${option.value}T12:00:00Z`);
+    const weekday=['周日','周一','周二','周三','周四','周五','周六'][option.day];
+    const label=`${weekday} · ${date.getUTCMonth()+1}月${date.getUTCDate()}日`+(option.value===baseDate?'（今天）':'');
+    return '<option value="'+option.value+'">'+label+'</option>';
+  }).join('');
+  todoDate=selected;
+  select.value=selected;
+  let value=storage(todoStorageKey(selected));
+  if(value===null&&migrateLegacy){
+    value=storage('todo:'+user);
+    if(value!==null)storage(todoStorageKey(selected),value);
+  }
+  $('#draft').value=value??'';
+  $('#draft-saved').textContent=value?'已保存在此浏览器':'未保存';
+}
+$('#todo-date').onchange=e=>{todoDate=e.target.value;renderTodoDates(todoBaseDate);};
 function reworks(){
   if(!sound||!user)return;
   let seen=[];try{seen=JSON.parse(storage('rework:'+user)||'[]');if(!Array.isArray(seen))seen=[];}catch{}
@@ -61,14 +98,16 @@ function renderPersonal(data){
 }
 async function refresh(){
   const data=await api('me');user=data.name;items=data.tasks;offset=data.server_time-Date.now();
-  if(draftOwner!==user){clearHeartbeatImages();$('#heartbeat').reset();draftOwner=user;workPlan=null;planRequestId=null;$('#work-text').value=storage('work-source:'+user)||'';previewWork();}
+  const firstVisit=draftOwner!==user;
+  if(firstVisit){clearHeartbeatImages();$('#heartbeat').reset();draftOwner=user;workPlan=null;planRequestId=null;todoDate=null;todoBaseDate=null;$('#work-text').value=storage('work-source:'+user)||'';previewWork();}
+  renderTodoDates(data.date,firstVisit);
   $('#welcome').hidden=true;$('#workspace').hidden=false;$('#logout').hidden=false;$('#identity').textContent=user;$('#greeting').textContent=user+'，今天也一起加油。';
   renderPersonal(data);
   const running=items.filter(t=>t.status==='进行中'&&!t.is_paused);
   const selectedHeartbeat=$('#heartbeat-task').value;
   $('#heartbeat-task').innerHTML=running.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.title)+'</option>').join('');
   if(running.some(t=>t.id===selectedHeartbeat))$('#heartbeat-task').value=selectedHeartbeat;
-  $('#task-count').textContent=items.length+' 项';$('#draft').value=storage('todo:'+user)||'';
+  $('#task-count').textContent=items.length+' 项';
   $('#end-status').textContent=items.some(t=>!['待验收','已完成'].includes(t.status))?'仍有待处理任务，请逐项完成。':'本轮任务均已提交，可以安心结束。';
   const renderTask = t => {
     let buttons='';
@@ -98,7 +137,7 @@ async function run(action,args){
 }
 $('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{name:new FormData(e.target).get('name')});await refresh();notice('欢迎回来，'+user+'。');}catch(err){notice(err.message,true);}};
 $('#logout').onclick=async()=>{if(busy)return;await api('logout',{});clearHeartbeatImages();clearActionImages();actionFiles=[];renderTaskFiles();$('#heartbeat').reset();user=null;draftOwner=null;workPlan=null;planRequestId=null;appendGroupId=null;appendRequestId=null;if($('#append-dialog').open)$('#append-dialog').close();$('#work-text').value='';renderPlan();$('#workspace').hidden=true;$('#welcome').hidden=false;$('#logout').hidden=true;$('#identity').textContent='我的工作台';};
-$('#draft').oninput=e=>{storage('todo:'+user,e.target.value);$('#draft-saved').textContent='已保存在此浏览器';};
+$('#draft').oninput=e=>{if(todoDate)storage(todoStorageKey(todoDate),e.target.value);$('#draft-saved').textContent='已保存在此浏览器';};
 function parseWorkText(text){
   const labels={'任务名称':'title','任务类型':'type','预计分钟':'estimated_minutes','交付内容':'deliverable_expectation','验收标准':'acceptance_criteria'};
   const result={};let key=null;
