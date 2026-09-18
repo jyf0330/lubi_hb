@@ -361,7 +361,7 @@ async function refresh() {
       );
       return `<button type="button" class="progress-person ${id.toLowerCase()}" data-progress-person="${id}">
         <span class="progress-person-top"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${latest ? `${own.length} 次汇报` : "今天暂无汇报"}</strong></span><span class="detail-link">${latest ? "查看详情 →" : "查看记录 →"}</span></span>
-        <span class="progress-person-latest">${latest ? `<time>${clock(latest.created_at)}</time><b>${esc(latest.title)}</b><span>${esc(heartbeatText(latest))}</span>` : "点击查看该成员的详细工作记录"}</span>
+        <span class="progress-person-latest">${latest ? `<time>${reportTimestamp(latest.created_at, dashboardDate)}</time><b>${esc(latest.title)}</b><span>${esc(heartbeatText(latest))}</span>` : "点击查看该成员的详细工作记录"}</span>
         <span class="progress-person-foot">${screenshotCount ? `截图 ${screenshotCount} 张` : "暂无截图"}${latest?.next_step ? ` · 下一步：${esc(latest.next_step)}` : ""}${reportImagePreviewStrip(latest?.images, dashboardApiRoot)}</span>
       </button>`;
     })
@@ -503,7 +503,7 @@ function showProgressDetail(assignee){
   document.querySelector('#progress-detail-title').textContent = `${names[assignee] || assignee} · 今日汇报`;
   document.querySelector('#progress-detail-content').innerHTML = items.length
     ? items.map((item) => `<article class="progress-detail-item">
-        <header><time>${clock(item.created_at)}</time><span class="progress-status">${esc(item.report_status || "进展")}</span></header>
+        <header><time>${reportTimestamp(item.created_at, dashboardDate)}</time><span class="progress-status">${esc(item.report_status || "进展")}</span></header>
         <h3>${esc(item.title)}</h3>
         <p>${esc(item.summary || "未填写具体说明")}</p>
         ${item.next_step ? `<div class="progress-detail-note"><b>下一步</b>${esc(item.next_step)}</div>` : ""}

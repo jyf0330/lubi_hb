@@ -3,6 +3,29 @@ function escapeGallery(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// oxlint-disable-next-line no-unused-vars -- consumed by employee.js and app.js.
+function reportTimestamp(ms, today) {
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+  const referenceDate = today || new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const time = new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Shanghai',
+  }).format(new Date(ms));
+  return date === referenceDate ? time : date + ' ' + time;
+}
+
 function galleryDownloadUrl(url) {
   return url + (url.includes('?') ? '&' : '?') + 'download=1';
 }
