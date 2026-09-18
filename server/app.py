@@ -871,6 +871,30 @@ def task_groups(db, member=None):
     return result
 
 
+def enrich_dashboard_tasks(db, tasks, timestamp):
+    for task in tasks:
+        task["actual_minutes"] = actual_minutes(db, task["id"], timestamp)
+        assessed_at = task.get("submitted_at") or task.get("completed_at") or timestamp
+        task.update(time_assessment(task["estimated_minutes"], int(task["actual_minutes"]), task.get("deadline_at"), assessed_at))
+        if task["status"] == "进行中" and not task["is_paused"]:
+            task["checkin"] = checkin_status(db, task["assignee"], timestamp, task["id"])
+    if tasks:
+        task_ids = [task["id"] for task in tasks]
+        placeholders = ",".join("?" for _ in task_ids)
+        task_sessions = {}
+        for row in db.execute(
+            f"SELECT * FROM work_sessions WHERE task_id IN ({placeholders}) ORDER BY started_at DESC",
+            task_ids,
+        ).fetchall():
+            session = dict(row)
+            end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
+            session["recorded_minutes"] = working_minutes_between(int(session["started_at"]), end_ms)
+            task_sessions.setdefault(session["task_id"], []).append(session)
+        for task in tasks:
+            task["time_sessions"] = task_sessions.get(task["id"], [])
+    task_files.attach_metadata(db, tasks)
+
+
 def dashboard_data() -> dict[str, object]:
     with DB_LOCK, connect() as db:
         timestamp = now_ms()
@@ -881,26 +905,9 @@ def dashboard_data() -> dict[str, object]:
             ORDER BY updated_at DESC""",
             (today(), day_start_ms(-6), day_start_ms(1)),
         ).fetchall()]
-        for task in tasks:
-            task["actual_minutes"] = actual_minutes(db, task["id"], timestamp)
-            assessed_at = task.get("submitted_at") or task.get("completed_at") or timestamp
-            task.update(time_assessment(task["estimated_minutes"], int(task["actual_minutes"]), task.get("deadline_at"), assessed_at))
-            if task["status"] == "进行中" and not task["is_paused"]:
-                task["checkin"] = checkin_status(db, task["assignee"], timestamp, task["id"])
-        if tasks:
-            task_ids = [task["id"] for task in tasks]
-            placeholders = ",".join("?" for _ in task_ids)
-            task_sessions = {}
-            for row in db.execute(
-                f"SELECT * FROM work_sessions WHERE task_id IN ({placeholders}) ORDER BY started_at DESC",
-                task_ids,
-            ).fetchall():
-                session = dict(row)
-                end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
-                session["recorded_minutes"] = working_minutes_between(int(session["started_at"]), end_ms)
-                task_sessions.setdefault(session["task_id"], []).append(session)
-            for task in tasks:
-                task["time_sessions"] = task_sessions.get(task["id"], [])
+        all_tasks = [dict(row) for row in db.execute("SELECT * FROM tasks ORDER BY updated_at DESC").fetchall()]
+        enrich_dashboard_tasks(db, tasks, timestamp)
+        enrich_dashboard_tasks(db, all_tasks, timestamp)
         sessions = [dict(row) for row in db.execute("SELECT ws.*, t.title, t.type FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id WHERE ws.started_at < ? AND (ws.ended_at IS NULL OR ws.ended_at > ?) ORDER BY ws.started_at DESC LIMIT 24", (day_start_ms(1), day_start_ms())).fetchall()]
         for session in sessions:
             end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
@@ -915,11 +922,10 @@ def dashboard_data() -> dict[str, object]:
         scores = workflow.daily_scores(db, today())
         report_images.attach_metadata(db, progress_updates)
         report_files.attach_metadata(db, progress_updates)
-        task_files.attach_metadata(db, tasks)
         groups = task_groups(db)
         reports = [dict(row) for row in db.execute("SELECT assignee, summary, submitted_at FROM daily_reports WHERE report_date = ? ORDER BY assignee", (today(),)).fetchall()]
         tomorrow_tasks = [dict(row) for row in db.execute("SELECT id, assignee, title, type, status, estimated_minutes, planned_points FROM tasks WHERE planned_date = ? ORDER BY assignee, created_at", (date_string(1),)).fetchall()]
-    return {"scores": scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+    return {"scores": scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 class Handler(BaseHTTPRequestHandler):

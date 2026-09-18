@@ -366,7 +366,7 @@ async function refresh() {
       </button>`;
     })
     .join("");
-  dashboardTasks = tasks;
+  dashboardTasks = (data.all_tasks || data.tasks).map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
   renderTasks();
   const reports = data.reports || [],
     tomorrow = data.tomorrow_tasks || [];
@@ -455,18 +455,21 @@ function renderActionCard(t, nested=false){
 function renderActionGroup(group, tasks){
   return `<article class="action action-group"><div class="action-group-heading"><span class="action-group-label">大任务</span><strong>${esc(group.title)}</strong><span>${esc(names[group.assignee]||group.assignee)} · ${esc(group.status)} · ${tasks.length} / ${group.total_count} 个小任务需处理</span></div><details class="action-group-details" open><summary>查看需处理的小任务</summary><div class="action-group-children">${tasks.map(t=>renderActionCard(t,true)).join('')}</div></details></article>`;
 }
-function renderTasks(){
-  const owner=document.querySelector('#owner-filter').value,status=document.querySelector('#status-filter').value,search=document.querySelector('#task-search').value.trim().toLowerCase();
-  const rank={'待验收':0,'阻塞':1,'需修改':2,'进行中':3,'今日待办':4,'已完成':5};
-  const list=dashboardTasks.filter(t=>(!owner||t.assignee===owner)&&(!status||t.status===status)&&(!search||(t.title+' '+t.group_title).toLowerCase().includes(search))).sort((a,b)=>Number(b.priority==='高')-Number(a.priority==='高')||rank[a.status]-rank[b.status]);
-  document.querySelector('#task-total').textContent=`显示 ${list.length} / ${dashboardTasks.length} 项`;
-  document.querySelector('#task-groups').innerHTML=dashboardGroups.filter(g=>(!owner||g.assignee===owner)&&(!status||g.status===status)&&(!search||(g.title+' '+g.tasks.map(t=>t.title).join(' ')).toLowerCase().includes(search))).map(g=>`<article class="group-summary"><strong>${esc(g.title)}</strong><p>${esc(names[g.assignee]||g.assignee)} · ${esc(g.status)} · 验收通过 ${g.completed_count}/${g.total_count} 项 · ${g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟'} · 小任务合计 ${g.estimated_minutes} 分钟 · 已记录 ${g.actual_minutes} 分钟</p><details><summary>交付与验收要求</summary><p>${esc(g.deliverable_expectation)}</p><p>${esc(g.acceptance_criteria)}</p></details></article>`).join('');
-  document.querySelector('#kanban').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${t.priority==='高'?'高优先 · ':''}${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(meta(t))}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.is_paused?'已暂停':t.status)}</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">没有符合条件的任务，可调整或清除筛选。</div>';
+function taskMatchesFilters(t, filters){
+  return (!filters.owner||t.assignee===filters.owner)&&(!filters.status||t.status===filters.status)&&(!filters.date||t.planned_date===filters.date)&&(!filters.search||(t.title+' '+(t.group_title||'')).toLowerCase().includes(filters.search));
 }
-for(const id of ['owner-filter','status-filter','task-search'])document.getElementById(id).addEventListener('input',renderTasks);
-document.querySelector('#clear-filters').onclick=()=>{for(const id of ['owner-filter','status-filter','task-search'])document.getElementById(id).value='';renderTasks();};
+function renderTasks(){
+  const filters={owner:document.querySelector('#owner-filter').value,status:document.querySelector('#status-filter').value,date:document.querySelector('#date-filter').value,search:document.querySelector('#task-search').value.trim().toLowerCase()};
+  const rank={'待验收':0,'阻塞':1,'需修改':2,'进行中':3,'今日待办':4,'已完成':5};
+  const list=dashboardTasks.filter(t=>taskMatchesFilters(t,filters)).sort((a,b)=>Number(b.priority==='高')-Number(a.priority==='高')||rank[a.status]-rank[b.status]);
+  document.querySelector('#task-total').textContent=`显示 ${list.length} / ${dashboardTasks.length} 项`;
+  document.querySelector('#task-groups').innerHTML=dashboardGroups.filter(g=>(!filters.owner||g.assignee===filters.owner)&&(!filters.status||g.status===filters.status)&&(!filters.search||(g.title+' '+g.tasks.map(t=>t.title).join(' ')).toLowerCase().includes(filters.search))&&(!filters.date||g.tasks.some(t=>t.planned_date===filters.date))).map(g=>`<article class="group-summary"><strong>${esc(g.title)}</strong><p>${esc(names[g.assignee]||g.assignee)} · ${esc(g.status)} · 验收通过 ${g.completed_count}/${g.total_count} 项 · ${g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟'} · 小任务合计 ${g.estimated_minutes} 分钟 · 已记录 ${g.actual_minutes} 分钟</p><details><summary>交付与验收要求</summary><p>${esc(g.deliverable_expectation)}</p><p>${esc(g.acceptance_criteria)}</p></details></article>`).join('');
+  document.querySelector('#kanban').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${t.priority==='高'?'高优先 · ':''}${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.planned_date?`计划 ${t.planned_date}`:'未排期')} · ${esc(meta(t))}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.is_paused?'已暂停':t.status)}</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">没有符合条件的任务，可调整或清除筛选。</div>';
+}
+for(const id of ['owner-filter','status-filter','date-filter','task-search'])document.getElementById(id).addEventListener('input',renderTasks);
+document.querySelector('#clear-filters').onclick=()=>{for(const id of ['owner-filter','status-filter','date-filter','task-search'])document.getElementById(id).value='';renderTasks();};
 document.querySelectorAll('[data-status-jump]').forEach(button=>button.onclick=()=>{
-  document.querySelector('#status-filter').value=button.dataset.statusJump;document.querySelector('#owner-filter').value='';document.querySelector('#task-search').value='';renderTasks();showPage('board',true);
+  document.querySelector('#status-filter').value=button.dataset.statusJump;document.querySelector('#owner-filter').value='';document.querySelector('#date-filter').value='';document.querySelector('#task-search').value='';renderTasks();showPage('board',true);
 });
 function showDetail(id){
   const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
