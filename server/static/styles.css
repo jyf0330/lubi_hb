@@ -101,3 +101,86 @@ dialog .detail-heading {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
+
+/* 任务详情：宽屏两栏（左信息 / 右审核）；短字段成 chip 行、长文本双列折叠，目标是一屏看完。 */
+#task-detail {
+  width: min(1080px, calc(100% - 32px));
+  max-height: min(92vh, 880px);
+}
+#detail-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+  align-items: start;
+}
+#detail-content.has-review {
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+}
+.detail-main { min-width: 0; }
+#task-detail .detail-heading { margin-bottom: 0; padding-bottom: 14px; }
+.detail-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.detail-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffefa;
+  font-size: 13px;
+}
+.detail-chip b { color: var(--muted); font-weight: 500; }
+.detail-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.detail-field {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffefa;
+}
+.detail-fields dt { margin: 0; color: var(--muted); font-size: 12px; }
+.detail-fields dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.detail-fields dd.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.detail-expand {
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  color: var(--cyan);
+}
+.detail-side { min-width: 0; }
+#detail-side #review-form {
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffefa;
+}
+#detail-side #review-form .panel-hint { margin: 0; }
+#detail-side #review-form textarea { min-height: 48px; }
+#detail-side .review-actions button { flex: 1 1 auto; }
+@media (max-width: 900px) {
+  #detail-content.has-review { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 680px) {
+  .detail-fields { grid-template-columns: 1fr; }
+}

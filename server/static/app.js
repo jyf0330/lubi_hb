@@ -475,9 +475,27 @@ function showDetail(id){
   const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
   let appendReason='';if(t.notes){try{appendReason=JSON.parse(t.notes).append_reason||'';}catch{}}
   const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['用时',timing(t)],['用时详情',timeDetails(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工自评分',t.employee_ai_points==null?'未填写':t.employee_ai_points+' 点'+(t.employee_ai_reason?' · '+t.employee_ai_reason:'')],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
-  document.querySelector('#detail-content').innerHTML=`<h3>${esc(t.title)}</h3><dl>${fields.filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${taskAttachmentGallery(t.attachments, dashboardApiRoot)}`;
+  const shortLabels=new Set(['所属大任务','负责人','状态','用时','优先级','员工自评分','最终得分']);
+  const items=fields.filter(([,v])=>v!==null&&v!==undefined&&v!=='');
+  const chips=items.filter(([label])=>shortLabels.has(label)).map(([label,value])=>'<span class="detail-chip"><b>'+label+'</b>'+esc(value)+'</span>').join('');
+  const details=items.filter(([label])=>!shortLabels.has(label)).map(([label,value])=>'<div class="detail-field"><dt>'+label+'</dt><dd>'+esc(value)+'</dd></div>').join('');
+  const canReview=t.status==='待验收';
+  const content=document.querySelector('#detail-content');
+  content.classList.toggle('has-review',canReview);
+  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+taskAttachmentGallery(t.attachments, dashboardApiRoot)+'</section>'+(canReview?'<aside class="detail-side" id="detail-side"></aside>':'');
   appendReviewForm(t);
   document.querySelector('#task-detail').showModal();
+  clampDetailFields();
+}
+function clampDetailFields(){
+  document.querySelectorAll('#detail-content .detail-field dd').forEach(dd=>{
+    dd.classList.add('is-clamped');
+    if(dd.scrollHeight<=dd.clientHeight+1){dd.classList.remove('is-clamped');return;}
+    const button=document.createElement('button');
+    button.type='button';button.className='detail-expand';button.textContent='展开全文';
+    button.onclick=()=>{const folded=dd.classList.toggle('is-clamped');button.textContent=folded?'展开全文':'收起';};
+    dd.after(button);
+  });
 }
 for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
@@ -547,8 +565,8 @@ async function restoreOwnerSession(){
 }
 function appendReviewForm(t){
   if(t.status!=='待验收')return;
-  const container=document.querySelector('#detail-content');
-  if(!ownerLoggedIn){container.insertAdjacentHTML('beforeend','<p>请先在页面下方登录负责人身份，再进行审核。</p>');return;}
+  const container=document.querySelector('#detail-side')||document.querySelector('#detail-content');
+  if(!ownerLoggedIn){container.insertAdjacentHTML('beforeend','<p class="panel-hint">请先在页面下方登录负责人身份，再进行审核。</p>');return;}
   const employeeScore=t.employee_ai_points==null?'未填写':t.employee_ai_points+' 点';
   container.insertAdjacentHTML('beforeend','<form id="review-form"><p class="panel-hint">员工自评分：<strong>'+esc(employeeScore)+'</strong>。直接通过验收将采用该分数。</p><button type="button" id="override-score" class="secondary">覆盖分数</button><div id="override-score-field" hidden><label>覆盖后的最终分数（整数，0 也算）<input name="points" type="number" min="0" max="10000" step="1" placeholder="填写要覆盖的最终分数"></label></div><label>审核说明（退回必填）<textarea name="reason" maxlength="1200" placeholder="时间不符需自述"></textarea></label><label for="review-files">审核附件（可选）</label><input id="review-files" type="file" accept="*/*" multiple><p class="panel-hint">可附验收截图、修改要求示例等证据。最多 6 个，单个不超过 20 MB，合计不超过 40 MB。</p><div id="review-file-previews" class="archive-previews"></div><p id="review-file-status" role="status"></p><div class="review-actions"><button type="button" id="platform-score">生成平台 AI 建议</button><button name="decision" value="accept">通过验收</button><button name="decision" value="rework">退回修改</button></div><p id="review-notice" role="status"></p></form>');
   reviewFiles=[];renderReviewFiles();
