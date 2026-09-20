@@ -404,27 +404,33 @@ async function refresh() {
       </section>`;
     })
     .join("");
-  const actions = tasks.filter((t) =>
-    ["待验收", "需修改", "阻塞"].includes(t.status),
-  );
-  document.querySelector("#action-count").textContent = actions.length;
-  const taskById = new Map(actions.map((task) => [task.id, task]));
-  const groupedActionIds = new Set();
+  const actionStatuses = ["待验收", "需修改", "阻塞"];
+  const actions = tasks.filter((t) => actionStatuses.includes(t.status));
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const groupedChildIds = new Set();
   const groupedActions = dashboardGroups
-    .map((group) => ({
-      group,
-      tasks: group.tasks.map((child) => taskById.get(child.id)).filter(Boolean),
-    }))
-    .filter(({ tasks }) => tasks.length)
-    .map(({ group, tasks }) => {
-      tasks.forEach((task) => groupedActionIds.add(task.id));
-      return renderActionGroup(group, tasks);
-    });
+    .map((group) => {
+      const children = group.tasks || [];
+      children.forEach((child) => groupedChildIds.add(child.id));
+      // A big task is accepted as a whole. Until every child is submitted we
+      // keep its pending children out of the owner's queue, so the owner is
+      // only asked to act once the whole big task is actually finished.
+      const ready = Boolean(group.ready_for_acceptance);
+      const visible = children
+        .filter((child) => actionStatuses.includes(child.status))
+        .filter((child) => ready || child.status !== "待验收")
+        .map((child) => ({ ...child, ...(taskById.get(child.id) || {}) }));
+      if (!ready && !visible.length) return null;
+      return renderActionGroup(group, visible, ready);
+    })
+    .filter(Boolean);
   const standaloneActions = actions
-    .filter((task) => !groupedActionIds.has(task.id))
+    .filter((task) => !groupedChildIds.has(task.id))
     .map((task) => renderActionCard(task));
-  document.querySelector("#actions").innerHTML = actions.length
-    ? [...groupedActions, ...standaloneActions].join("")
+  const actionEntries = [...groupedActions, ...standaloneActions];
+  document.querySelector("#action-count").textContent = actionEntries.length;
+  document.querySelector("#actions").innerHTML = actionEntries.length
+    ? actionEntries.join("")
     : '<div class="empty">当前无需处理</div>';
 }
 let dashboardTasks = [];
@@ -452,8 +458,19 @@ showPage(location.hash.slice(1));
 function renderActionCard(t, nested=false){
   return `<button type="button" class="action${nested?' action-child':''}" data-task-id="${esc(t.id)}"><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.status)}</span><strong>${esc(t.title)}</strong><span>${esc(names[t.assignee]||t.assignee)} · ${esc(meta(t))}</span><span class="detail-link">查看详情 →</span></button>`;
 }
-function renderActionGroup(group, tasks){
-  return `<article class="action action-group"><div class="action-group-heading"><span class="action-group-label">大任务</span><strong>${esc(group.title)}</strong><span>${esc(names[group.assignee]||group.assignee)} · ${esc(group.status)} · ${tasks.length} / ${group.total_count} 个小任务需处理</span></div><details class="action-group-details" open><summary>查看需处理的小任务</summary><div class="action-group-children">${tasks.map(t=>renderActionCard(t,true)).join('')}</div></details></article>`;
+function renderActionGroup(group, tasks, ready){
+  const suggested = formatPoints(group.suggested_points || 0);
+  const missingScore = group.suggested_complete === false;
+  const review = ready
+    ? `<div class="action-group-review"><span>员工建议总分 <strong>${suggested} 点</strong>${missingScore?' · 部分小任务未填自评分':''}</span>${ownerLoggedIn?`<button type="button" class="primary" data-group-review="${esc(group.id)}"${missingScore?' disabled title="有小任务缺少员工自评分，请先在小任务里补齐"':''}>一次验收大任务（${suggested} 点）</button>`:'<span class="hint">登录负责人身份后可一次验收</span>'}</div>`
+    : "";
+  const heading = ready
+    ? `大任务已全部提交 · ${group.total_count} 个小任务待一次验收`
+    : `${esc(names[group.assignee]||group.assignee)} · ${esc(group.status)} · ${tasks.length} / ${group.total_count} 个小任务需处理`;
+  const children = tasks.length
+    ? `<details class="action-group-details" open><summary>查看小任务（${tasks.length} 项）</summary><div class="action-group-children">${tasks.map(t=>renderActionCard(t,true)).join('')}</div></details>`
+    : "";
+  return `<article class="action action-group"><div class="action-group-heading"><span class="action-group-label">大任务</span><strong>${esc(group.title)}</strong><span>${heading}</span></div>${review}${children}</article>`;
 }
 function taskMatchesFilters(t, filters){
   return (!filters.owner||t.assignee===filters.owner)&&(!filters.status||t.status===filters.status)&&(!filters.date||t.planned_date===filters.date)&&(!filters.search||(t.title+' '+(t.group_title||'')).toLowerCase().includes(filters.search));
@@ -463,7 +480,7 @@ function renderTasks(){
   const rank={'待验收':0,'阻塞':1,'需修改':2,'进行中':3,'今日待办':4,'已完成':5};
   const list=dashboardTasks.filter(t=>taskMatchesFilters(t,filters)).sort((a,b)=>Number(b.priority==='高')-Number(a.priority==='高')||rank[a.status]-rank[b.status]);
   document.querySelector('#task-total').textContent=`显示 ${list.length} / ${dashboardTasks.length} 项`;
-  document.querySelector('#task-groups').innerHTML=dashboardGroups.filter(g=>(!filters.owner||g.assignee===filters.owner)&&(!filters.status||g.status===filters.status)&&(!filters.search||(g.title+' '+g.tasks.map(t=>t.title).join(' ')).toLowerCase().includes(filters.search))&&(!filters.date||g.tasks.some(t=>t.planned_date===filters.date))).map(g=>`<article class="group-summary"><strong>${esc(g.title)}</strong><p>${esc(names[g.assignee]||g.assignee)} · ${esc(g.status)} · 验收通过 ${g.completed_count}/${g.total_count} 项 · ${g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟'} · 小任务合计 ${g.estimated_minutes} 分钟 · 已记录 ${g.actual_minutes} 分钟</p><details><summary>交付与验收要求</summary><p>${esc(g.deliverable_expectation)}</p><p>${esc(g.acceptance_criteria)}</p></details></article>`).join('');
+  document.querySelector('#task-groups').innerHTML=dashboardGroups.filter(g=>(!filters.owner||g.assignee===filters.owner)&&(!filters.status||g.status===filters.status)&&(!filters.search||(g.title+' '+g.tasks.map(t=>t.title).join(' ')).toLowerCase().includes(filters.search))&&(!filters.date||g.tasks.some(t=>t.planned_date===filters.date))).map(g=>`<article class="group-summary"><strong>${esc(g.title)}</strong><p>${esc(names[g.assignee]||g.assignee)} · ${esc(g.status)} · 验收通过 ${g.completed_count}/${g.total_count} 项${g.pending_count?` · 待验收 ${g.pending_count} 项 · 员工建议合计 ${formatPoints(g.suggested_points)} 点`:''}${g.status==='已完成'?` · 最终得分 ${formatPoints(g.awarded_points)} 点`:''} · ${g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟'} · 小任务合计 ${g.estimated_minutes} 分钟 · 已记录 ${g.actual_minutes} 分钟</p><details><summary>交付与验收要求</summary><p>${esc(g.deliverable_expectation)}</p><p>${esc(g.acceptance_criteria)}</p></details></article>`).join('');
   document.querySelector('#kanban').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${t.priority==='高'?'高优先 · ':''}${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.planned_date?`计划 ${t.planned_date}`:'未排期')} · ${esc(meta(t))}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.is_paused?'已暂停':t.status)}</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">没有符合条件的任务，可调整或清除筛选。</div>';
 }
 for(const id of ['owner-filter','status-filter','date-filter','task-search'])document.getElementById(id).addEventListener('input',renderTasks);
@@ -497,7 +514,16 @@ function clampDetailFields(){
     dd.after(button);
   });
 }
-for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+async function reviewGroup(groupId,button){
+  const group=dashboardGroups.find(g=>g.id===groupId);
+  if(!group)return;
+  const total=formatPoints(group.suggested_points||0);
+  if(!confirm(`确认一次验收大任务“${group.title}”？\n将按员工自评分合计 ${total} 点，直接通过其中 ${group.total_count} 个小任务。`))return;
+  button.disabled=true;
+  try{await ownerApi('action',{action:'owner_review_group',args:{group_id:group.id}});await loadDashboard();}
+  catch(error){alert(error.message);button.disabled=false;}
+}
+for(const id of ['kanban','actions','progress-pending'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 function showScoreDetail(){

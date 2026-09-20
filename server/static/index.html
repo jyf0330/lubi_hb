@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=detail-layout-20260920"><link rel="stylesheet" href="report-images.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=group-accept-20260920"><link rel="stylesheet" href="report-images.css"></head>
 <body><header class="topbar"><div class="mark">☀</div><div><h1>露比工作室</h1><p>团队管理工作台</p></div><span id="today" class="date"></span><a class="employee-link" href="employee">姓名登录 · 我的信息 ↗</a></header>
 <main><div class="page-heading"><div><span class="eyebrow">掌握进展，及时支持</span><h2>团队工作，一目了然</h2></div><div class="refresh-tools"><span id="sync-status" role="status">正在读取最新记录…</span><button type="button" id="refresh-dashboard">刷新数据</button></div></div>
 <nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button></nav><p id="load-error" role="alert" hidden></p>
@@ -42,7 +42,7 @@
             </div>
             <b id="action-count" class="count">0</b>
           </header>
-          <p class="panel-hint priority-group-hint">大任务先汇总展示；展开后查看需要处理的小任务。</p><div id="actions" class="actions"></div>
+          <p class="panel-hint priority-group-hint">大任务的全部小任务提交后才需要验收；汇总卡显示员工建议总分，可一次验收。</p><div id="actions" class="actions"></div>
         </aside></div><details class="timer-details"><summary>专注与休息</summary><section id="pomodoro" class="pomodoro phase-off" aria-label="番茄钟">
         <div class="pomodoro-mark" aria-hidden="true">◷</div>
         <div class="pomodoro-copy">
@@ -120,4 +120,4 @@
 <dialog id="task-detail"><div class="detail-heading"><h2>任务详情</h2><button id="close-detail" type="button">关闭</button></div><div id="detail-content"></div></dialog>
 <dialog id="score-detail"><div class="detail-heading"><h2>今日审核得分明细</h2><button id="close-score-detail" type="button">关闭</button></div><div id="score-detail-content"></div></dialog>
 <dialog id="progress-detail"><div class="detail-heading"><h2 id="progress-detail-title">汇报详情</h2><button id="close-progress-detail" type="button">关闭</button></div><div id="progress-detail-content"></div></dialog>
-</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=detail-layout-20260920" defer></script></body></html>
+</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=group-accept-20260920" defer></script></body></html>

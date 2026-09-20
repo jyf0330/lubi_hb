@@ -381,7 +381,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     timestamp = now_ms()
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
-        if name in ('owner_insert_task', 'owner_review_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
+        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
             if attachments:
@@ -863,10 +863,17 @@ def task_groups(db, member=None):
         for child in children:
             child["actual_minutes"] = actual_minutes(db, child["id"], timestamp)
         states = [t["status"] for t in children]
+        # The owner only reviews a big task once every child is submitted, then
+        # accepts the whole group in one step using the employees' own scores.
         group.update(tasks=children, estimated_minutes=sum(t["estimated_minutes"] for t in children),
                      child_estimated_minutes=sum(t["estimated_minutes"] for t in children),
                      actual_minutes=sum(t["actual_minutes"] for t in children),
                      completed_count=states.count("已完成"), total_count=len(children),
+                     pending_count=states.count("待验收"),
+                     suggested_points=sum(t["employee_ai_points"] for t in children if t["employee_ai_points"] is not None),
+                     awarded_points=sum(t["awarded_points"] for t in children if t["awarded_points"] is not None),
+                     suggested_complete=bool(children) and all(t["employee_ai_points"] is not None for t in children),
+                     ready_for_acceptance=bool(children) and all(x == "待验收" for x in states),
                      status="已完成" if states and all(x == "已完成" for x in states) else
                      "待验收" if states and all(x in ("已完成", "待验收") for x in states) else
                      next((x for x in ("需修改", "阻塞", "进行中") if x in states), "进行中" if any(x in ("待验收", "已完成") for x in states) else "今日待办"))
@@ -1008,7 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")

@@ -50,6 +50,42 @@ def apply(db, member, name, args, stamp, event, today):
         db.execute("INSERT INTO tasks(id,assignee,title,type,status,priority,planned_date,estimated_minutes,planned_points,acceptance_criteria,owner_inserted,created_at,updated_at) VALUES (?,?,?,'其他','今日待办','普通',?,?,0,?,1,?,?)", (task_id, owner, title, today, minutes, criteria, stamp, stamp))
         event(db, task_id, member, '负责人临时插单', None, '今日待办', '等待员工手动标高；通常两小时以内', stamp)
         return {'task_id': task_id, 'message': '临时任务已插入，等待员工标为高优先。'}
+    if name == 'owner_review_group':
+        # One-click acceptance for a whole big task. Only allowed once every
+        # child has been submitted, so the owner is never asked to review a
+        # big task piece by piece while work is still coming in.
+        if member != 'YWH':
+            raise ValueError('只有负责人可以审核打分。')
+        group_id = str(args.get('group_id') or '').strip()
+        group = db.execute('SELECT * FROM task_groups WHERE id=?', (group_id,)).fetchone()
+        if not group:
+            raise ValueError('找不到该大任务，请刷新后重试。')
+        children = db.execute('SELECT * FROM tasks WHERE group_id=? ORDER BY group_order, created_at', (group_id,)).fetchall()
+        if not children:
+            raise ValueError('该大任务还没有小任务。')
+        pending = [child for child in children if child['status'] == '待验收']
+        if len(pending) != len(children):
+            remaining = len(children) - len(pending)
+            raise ValueError(f'大任务还有 {remaining} 个小任务未提交待验收，全部提交后才能一次验收。')
+        reason = str(args.get('reason') or '').strip()
+        if len(reason) > 1200:
+            raise ValueError('审核说明最多 1200 字。')
+        missing = [child['title'] for child in children if child['employee_ai_points'] is None]
+        if missing:
+            raise ValueError('以下小任务缺少员工自评分，不能一次验收：' + '、'.join(missing[:5]))
+        acceptance = reason or '大任务整体验收通过'
+        total = 0
+        for child in children:
+            score = points(child['employee_ai_points'])
+            total += score
+            changed = db.execute(
+                "UPDATE tasks SET status='已完成',awarded_points=?,completed_at=?,acceptance_result=?,priority='普通',updated_at=? WHERE id=? AND status='待验收'",
+                (score, stamp, acceptance, stamp, child['id']),
+            ).rowcount
+            if changed != 1:
+                raise ValueError('任务已变化，请刷新后重试。')
+            event(db, child['id'], member, '审核通过', '待验收', '已完成', json.dumps({'points': score, 'reason': acceptance, 'group_review': group['title']}, ensure_ascii=False), stamp)
+        return {'message': f'已一次验收“{group["title"]}”的 {len(children)} 个小任务，合计 {total} 点。', 'group_id': group_id, 'points': total, 'accepted_count': len(children)}
     task = db.execute('SELECT * FROM tasks WHERE id=?', (str(args.get('task_id', '')),)).fetchone()
     if not task:
         raise ValueError('找不到该任务。')

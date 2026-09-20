@@ -97,6 +97,59 @@ class Plans(unittest.TestCase):
         app.initialize_database()  # repeated additive migration preserves data
         with app.connect() as db: self.assertEqual(db.execute('select count(*) from tasks').fetchone()[0], 5)
 
+    def test_group_acceptance_waits_for_all_children_and_uses_self_scores(self):
+        app.create_task_group('ZHC', self.data)
+        with app.connect() as db:
+            group_id = app.task_groups(db, 'ZHC')[0]['id']
+            ids = [child['id'] for child in app.task_groups(db, 'ZHC')[0]['tasks']]
+        scores = [2, 1, 3, 0, 4]
+
+        def submit(index):
+            app.call_tool('ZHC', 'work_start_task', {'task_id': ids[index]})
+            app.call_tool('ZHC', 'work_finish_task', {'task_id': ids[index], 'summary': f'第 {index + 1} 阶段完成', 'employee_points': scores[index]})
+
+        submit(0)
+        with app.connect() as db:
+            group = app.task_groups(db, 'ZHC')[0]
+            self.assertFalse(group['ready_for_acceptance'])
+            self.assertEqual((group['pending_count'], group['suggested_points']), (1, 2))
+        with self.assertRaises(ValueError):  # not every child is submitted yet
+            app.call_tool('YWH', 'owner_review_group', {'group_id': group_id})
+        with self.assertRaises(ValueError):  # only the owner may accept a whole group
+            app.call_tool('ZHC', 'owner_review_group', {'group_id': group_id})
+        for index in range(1, len(ids)):
+            submit(index)
+        with app.connect() as db:
+            group = app.task_groups(db, 'ZHC')[0]
+            self.assertTrue(group['ready_for_acceptance'])
+            self.assertTrue(group['suggested_complete'])
+            self.assertEqual(group['suggested_points'], sum(scores))
+        result = app.call_tool('YWH', 'owner_review_group', {'group_id': group_id})['structuredContent']
+        self.assertEqual((result['accepted_count'], result['points']), (5, sum(scores)))
+        with app.connect() as db:
+            rows = [dict(row) for row in db.execute('SELECT status, awarded_points FROM tasks WHERE group_id=?', (group_id,))]
+            self.assertTrue(all(row['status'] == '已完成' for row in rows))
+            self.assertEqual(sum(row['awarded_points'] for row in rows), sum(scores))
+            group = app.task_groups(db, 'ZHC')[0]
+            self.assertEqual((group['status'], group['awarded_points']), ('已完成', sum(scores)))
+        with self.assertRaises(ValueError):  # repeating the acceptance is refused
+            app.call_tool('YWH', 'owner_review_group', {'group_id': group_id})
+
+    def test_group_acceptance_requires_every_child_self_score(self):
+        app.create_task_group('ZHC', self.data)
+        with app.connect() as db:
+            group_id = app.task_groups(db, 'ZHC')[0]['id']
+            ids = [child['id'] for child in app.task_groups(db, 'ZHC')[0]['tasks']]
+        for task_id in ids:
+            app.call_tool('ZHC', 'work_start_task', {'task_id': task_id})
+            app.call_tool('ZHC', 'work_finish_task', {'task_id': task_id, 'summary': '完成本阶段', 'employee_points': 1})
+        with app.connect() as db:
+            db.execute('UPDATE tasks SET employee_ai_points=NULL WHERE id=?', (ids[0],))
+        with self.assertRaises(ValueError):
+            app.call_tool('YWH', 'owner_review_group', {'group_id': group_id})
+        with app.connect() as db:
+            self.assertEqual(app.task_groups(db, 'ZHC')[0]['status'], '待验收')
+
     def test_append_group_preserves_history_and_updates_child_rollup(self):
         app.create_task_group('ZHC', self.data)
         with app.connect() as db:
