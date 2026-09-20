@@ -53,7 +53,13 @@ done
 [ -d server/static ] || { echo "错误：缺少 server/static 目录" >&2; exit 1; }
 
 echo "==> 语法检查"
-python3 -m py_compile "${APP_FILES[@]/#/server/}"
+PY_FILES=()
+for f in "${APP_FILES[@]}"; do
+  case "$f" in
+    *.py) PY_FILES+=("server/$f") ;;
+  esac
+done
+python3 -m py_compile "${PY_FILES[@]}"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 BK="$TARGET/backups/deploy-$TS-$REV"
