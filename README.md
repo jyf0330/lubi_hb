@@ -4,6 +4,16 @@
 
 下方保留旧 Vinext/D1 原型说明，其每小时换算点数规则不适用于正式审核得分。
 
+## 部署（腾讯云）
+
+正式服务运行在 `ubuntu@124.222.83.113` 的 `/opt/game-team-board`，数据库为 `/var/lib/game-team-board/tasks.db`。服务器上保留一份本仓库的 git 源，发布时在源目录执行：
+
+```bash
+bash scripts/deploy.sh
+```
+
+脚本会先校验工作区干净且位于目标分支，执行 `git pull --ff-only`，把现有正式文件备份到 `/opt/game-team-board/backups/deploy-<时间>-<版本>/`，只发布 `server/` 下的服务模块与 `static/` 资源，逐文件比对 md5 后重启 `game-team-board.service` 并做健康检查。它不会发布 nginx 配置、systemd 单元、测试或文档，也不会删除正式目录中仓库之外的文件。
+
 # 两人游戏团队每日任务系统
 
 这是一个使用 Vinext、Cloudflare D1（SQLite）和 Drizzle 的本地任务看板，固定服务于 ZHC 与 YWT 两名成员。
