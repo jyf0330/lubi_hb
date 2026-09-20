@@ -38,11 +38,11 @@ fi
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-  echo "错误：当前分支为 $CURRENT_BRANCH，期望 $BRANCH。" >&2
+  echo "错误：当前分支为 ${CURRENT_BRANCH}，期望 ${BRANCH}。" >&2
   exit 1
 fi
 
-echo "==> 拉取最新代码（git pull --ff-only origin $BRANCH）"
+echo "==> 拉取最新代码（git pull --ff-only origin ${BRANCH}）"
 git pull --ff-only origin "$BRANCH"
 REV="$(git rev-parse --short HEAD)"
 echo "==> 目标版本：$REV"
@@ -92,7 +92,7 @@ for f in server/static/*; do
 done
 for f in "$TARGET"/static/*; do
   name="$(basename "$f")"
-  [ -f "server/static/$name" ] || echo "提示：正式目录存在仓库外的静态文件 static/$name，本次未改动"
+  [ -f "server/static/$name" ] || echo "提示：正式目录存在仓库外的静态文件 static/${name}，本次未改动"
 done
 
 echo "==> 重启 $SERVICE"
