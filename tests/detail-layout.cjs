@@ -12,7 +12,7 @@ assert.match(app, /class="detail-chip"><b>/);
 assert.match(app, /class="detail-fields">/);
 assert.match(app, /class="detail-field"><dt>/);
 assert.match(app, /<aside class="detail-side" id="detail-side">/);
-assert.match(app, /content\.classList\.toggle\('has-review',canReview\)/);
+assert.match(app, /content\.classList\.toggle\('has-review',canReview\|\|canClose\)/);
 assert.match(app, /function clampDetailFields\(\)/);
 assert.match(app, /classList\.add\('is-clamped'\)/);
 assert.match(app, /'展开全文'/);
@@ -20,8 +20,8 @@ assert.match(
   app,
   /querySelector\('#task-detail'\)\.showModal\(\);\s*\n\s*clampDetailFields\(\);/,
 );
-// 只有待验收任务才创建右栏，其他状态应单栏满宽。
-assert.match(app, /\(canReview\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
+// 待验收任务及负责人可关闭的阻塞/返工任务显示右栏，其他状态单栏满宽。
+assert.match(app, /\(canReview\|\|canClose\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
 // 审核表单必须落在右栏容器内，而不是直接塞进 #detail-content。
 assert.match(
   app,
