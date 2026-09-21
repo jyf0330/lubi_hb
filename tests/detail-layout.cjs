@@ -25,7 +25,7 @@ assert.match(app, /\(canReview\|\|canClose\|\|canEditScore\?'<aside class="detai
 assert.match(app, /function appendScoreEditForm\(t\)/);
 assert.match(app, /action:'owner_set_task_score'/);
 assert.match(app, /class="timeline-event kind-\$\{item\.type\}" data-task-id="\$\{esc\(item\.task_id\)\}"/);
-assert.match(app, /'sessions','timeline-attention'\]\)document\.getElementById\(id\)\.onclick/);
+assert.match(app, /'progress-pending','timeline-people'\]\)document\.getElementById\(id\)\.onclick/);
 // 审核表单必须落在右栏容器内，而不是直接塞进 #detail-content。
 assert.match(
   app,

@@ -12,6 +12,7 @@ let ownerLoggedIn = false;
 const statuses = ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞", "已关闭"];
 const PRIORITY_STATUSES = ["待验收", "阻塞", "需修改"];
 const names = { ZHC: "赵浩丞", YWT: "余文滔", YWH: "余文浩" };
+const TIMELINE_EMPLOYEES = ["ZHC", "YWT"];
 const WORK_SECONDS = 25 * 60;
 const REST_SECONDS = 5 * 60;
 const CYCLE_SECONDS = WORK_SECONDS + REST_SECONDS;
@@ -193,10 +194,8 @@ function timelineAttention(tasks, date, assignee) {
 }
 function renderTimeline() {
   const date = document.querySelector("#timeline-date").value || dashboardDate;
-  const assignee = document.querySelector("#timeline-person").value;
   const kind = document.querySelector("#timeline-kind").value;
   const query = document.querySelector("#timeline-search").value.trim().toLowerCase();
-  const members = assignee ? [assignee] : ["ZHC", "YWT", "YWH"];
   const sessions = dashboardTimelineSessions.filter((session) => shanghaiDate(session.started_at) <= date && shanghaiDate(session.ended_at || dashboardServerTime || Date.now()) >= date);
   const progresses = dashboardTimelineProgress.filter((item) => shanghaiDate(item.created_at) === date);
   const rawEvents = dashboardTimelineEvents.filter((item) => shanghaiDate(item.created_at) === date && item.event_type !== "30分钟汇报" && !/计时/.test(item.event_type));
@@ -222,30 +221,28 @@ function renderTimeline() {
     ...rawEvents.map((item) => ({
       ...item, type:timelineEventKind(item.event_type), label:item.event_type, detail:timelineEventDetail(item),
     })),
-  ].filter((item) => (!assignee || item.assignee === assignee) && (!kind || item.type === kind) && (!query || `${item.title} ${item.label} ${item.detail}`.toLowerCase().includes(query)))
+  ].filter((item) => TIMELINE_EMPLOYEES.includes(item.assignee) && (!kind || item.type === kind) && (!query || `${item.title} ${item.label} ${item.detail}`.toLowerCase().includes(query)))
     .sort((a,b) => Number(b.created_at) - Number(a.created_at));
   const tasks = dashboardTasks;
-  const attention = timelineAttention(tasks, date, assignee);
-  document.querySelector("#timeline-summary").innerHTML = members.map((id) => {
+  document.querySelector("#timeline-people").innerHTML = TIMELINE_EMPLOYEES.map((id) => {
     const ownSessions = sessions.filter((item) => item.assignee === id);
+    const ownEvents = events.filter((item) => item.assignee === id);
     const taskCount = new Set(ownSessions.map((item) => item.task_id)).size;
     const minutes = ownSessions.reduce((sum,item) => sum + workingMinutesForDate(item,date), 0);
     const hbCount = progresses.filter((item) => item.assignee === id).length;
     const score = dashboardScores.find((item) => item.date === date && item.assignee === id) || {};
     const current = date === dashboardDate ? tasks.filter((item) => item.assignee === id && item.status === "进行中" && !item.is_paused).length : 0;
-    const ownAttention = timelineAttention(tasks,date,id).length;
-    return `<button type="button" class="timeline-person-summary ${id.toLowerCase()}${assignee===id?' selected':''}" data-timeline-person="${id}" aria-pressed="${assignee===id}"><span class="timeline-person-title"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${date===dashboardDate ? `${current} 项正在计时` : `${date} 记录`}</strong></span></span><span class="timeline-person-metrics"><span><b>${taskCount}</b> 项任务</span><span><b>${minutes}</b> 任务分钟</span><span><b>${hbCount}</b> 次 HB</span><span><b>${score.completed_count || 0}</b> 项完成</span><span><b>${formatPoints(score.points || 0)}</b> 点</span></span>${ownAttention?`<span class="timeline-person-warning">${ownAttention} 项待关注</span>`:'<span class="timeline-person-ok">当前无待处理异常</span>'}</button>`;
+    const attention = timelineAttention(tasks,date,id);
+    const feed = ownEvents.length ? ownEvents.map((item) => {
+      const evidence = (item.images?.length || item.attachments?.length) ? ` · 附件 ${(item.images?.length || 0) + (item.attachments?.length || 0)} 个` : "";
+      return `<button type="button" class="timeline-event kind-${item.type}" data-task-id="${esc(item.task_id)}"><span class="timeline-event-time"><time>${esc(item.time_label || clock(item.created_at))}</time><span>${esc(names[item.assignee] || item.assignee)}</span></span><span class="timeline-event-mark" aria-hidden="true"></span><span class="timeline-event-copy"><span class="timeline-event-label">${esc(item.label)}</span><strong>${esc(item.title)}</strong><span>${esc(item.detail)}${esc(evidence)}</span></span><span class="detail-link">任务详情 →</span></button>`;
+    }).join("") : '<div class="empty">当前筛选条件下没有工作记录。</div>';
+    const attentionHtml = date !== dashboardDate
+      ? '<div class="empty-timeline-attention">历史日期展示事实记录；待处理提醒以今天的当前状态为准。</div>'
+      : attention.length ? attention.map((item) => `<button type="button" class="timeline-alert ${item.tone}" data-task-id="${esc(item.task.id)}"><span>${esc(item.title)}</span><strong>${esc(item.task.title)}</strong><small>${esc(item.detail)}</small></button>`).join("") : '<div class="empty-timeline-attention">当前没有阻塞、返工、HB 超时或交付证据提醒。</div>';
+    return `<article class="timeline-person-track ${id.toLowerCase()}" aria-labelledby="timeline-heading-${id}"><header class="timeline-person-header"><span class="timeline-person-title"><span class="avatar">${id}</span><span><small>员工工作轨迹</small><h3 id="timeline-heading-${id}">${esc(names[id])}</h3></span></span><span class="timeline-person-state">${date===dashboardDate ? `${current} 项正在计时` : `${date} 记录`}</span></header><div class="timeline-person-metrics"><span><b>${taskCount}</b> 项任务</span><span><b>${minutes}</b> 任务分钟</span><span><b>${hbCount}</b> 次 HB</span><span><b>${score.completed_count || 0}</b> 项完成</span><span><b>${formatPoints(score.points || 0)}</b> 点</span></div><section class="timeline-person-feed" aria-label="${esc(names[id])}的工作记录"><div class="timeline-section-heading"><div><small>按时间倒序</small><h4>工作记录</h4></div><span>${ownEvents.length} 条</span></div><div class="timeline-feed">${feed}</div></section><aside class="timeline-person-attention" aria-label="${esc(names[id])}的异常与关注"><div class="timeline-section-heading"><div><small>负责人待处理</small><h4>异常与关注</h4></div><b class="count">${attention.length}</b></div><div class="timeline-attention-list">${attentionHtml}</div></aside></article>`;
   }).join("");
   document.querySelector("#timeline-result-count").textContent = `${date} · ${events.length} 条记录`;
-  document.querySelector("#timeline-feed-note").textContent = assignee ? names[assignee] : "全部员工";
-  document.querySelector("#sessions").innerHTML = events.length ? events.map((item) => {
-    const evidence = (item.images?.length || item.attachments?.length) ? ` · 附件 ${(item.images?.length || 0) + (item.attachments?.length || 0)} 个` : "";
-    return `<button type="button" class="timeline-event kind-${item.type}" data-task-id="${esc(item.task_id)}"><span class="timeline-event-time"><time>${esc(item.time_label || clock(item.created_at))}</time><span>${esc(names[item.assignee] || item.assignee)}</span></span><span class="timeline-event-mark" aria-hidden="true"></span><span class="timeline-event-copy"><span class="timeline-event-label">${esc(item.label)}</span><strong>${esc(item.title)}</strong><span>${esc(item.detail)}${esc(evidence)}</span></span><span class="detail-link">任务详情 →</span></button>`;
-  }).join("") : '<div class="empty">当前筛选条件下没有工作记录。</div>';
-  document.querySelector("#timeline-attention-count").textContent = attention.length;
-  document.querySelector("#timeline-attention").innerHTML = date !== dashboardDate
-    ? '<div class="empty-timeline-attention">历史日期展示事实记录；待处理提醒以今天的当前状态为准。</div>'
-    : attention.length ? attention.map((item) => `<button type="button" class="timeline-alert ${item.tone}" data-task-id="${esc(item.task.id)}"><span>${esc(item.title)}</span><strong>${esc(item.task.title)}</strong><small>${esc(names[item.task.assignee] || item.task.assignee)} · ${esc(item.detail)}</small></button>`).join("") : '<div class="empty-timeline-attention">当前没有阻塞、返工、HB 超时或交付证据提醒。</div>';
 }
 
 function shanghaiSeconds(date = new Date()) {
@@ -737,12 +734,11 @@ async function reviewGroup(groupId,button){
   try{await ownerApi('action',{action:'owner_review_group',args:{group_id:group.id}});await loadDashboard();}
   catch(error){alert(error.message);button.disabled=false;}
 }
-for(const id of ['kanban','closed-tasks','actions','progress-pending','sessions','timeline-attention'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+for(const id of ['kanban','closed-tasks','actions','progress-pending','timeline-people'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#daily-completion-scores').onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
-for(const id of ['timeline-date','timeline-person','timeline-kind','timeline-search'])document.getElementById(id).addEventListener('input',renderTimeline);
-document.querySelector('#timeline-clear').onclick=()=>{document.querySelector('#timeline-date').value=dashboardDate;document.querySelector('#timeline-person').value='';document.querySelector('#timeline-kind').value='';document.querySelector('#timeline-search').value='';renderTimeline();};
-document.querySelector('#timeline-summary').onclick=event=>{const card=event.target.closest('[data-timeline-person]');if(!card)return;const select=document.querySelector('#timeline-person');select.value=select.value===card.dataset.timelinePerson?'':card.dataset.timelinePerson;renderTimeline();};
+for(const id of ['timeline-date','timeline-kind','timeline-search'])document.getElementById(id).addEventListener('input',renderTimeline);
+document.querySelector('#timeline-clear').onclick=()=>{document.querySelector('#timeline-date').value=dashboardDate;document.querySelector('#timeline-kind').value='';document.querySelector('#timeline-search').value='';renderTimeline();};
 document.querySelector('#timeline-score-jump').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'start'});
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 document.querySelector('[data-score-details]').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'center'});
