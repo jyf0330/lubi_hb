@@ -110,7 +110,7 @@ function renderTodayScoreDetails(tasks){
   const pointLabel=task=>task.awarded_points==null?'尚未记分':esc(task.awarded_points)+' 点';
   const list=(items,label)=>'<ul>'+items.map(task=>'<li><span>'+esc(label)+' · '+esc(task.title)+'</span><strong>'+pointLabel(task)+'</strong></li>').join('')+'</ul>';
   return [...groups.values()].map(group=>'<section class="today-score-group"><h3>大任务 · '+esc(group.title)+'</h3>'+list(group.tasks,'小任务')+'</section>').join('')+
-    (standalone.length?'<section class="today-score-group"><h3>独立任务</h3>'+list(standalone,'任务')+'</section>':'');
+    (standalone.length?'<section class="today-score-group"><h3>历史任务（未区分大小）</h3><p class="hint">这些记录创建时没有大任务/小任务分类，按原任务得分计入，不推测归属。</p>'+list(standalone,'历史任务')+'</section>':'');
 }
 function renderEmployeeReminders(tasks){
   const reminders=[];

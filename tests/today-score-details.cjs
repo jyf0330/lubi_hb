@@ -27,13 +27,16 @@ const html = renderTodayScoreDetails([
 assert.match(html, /大任务 · 角色制作/);
 assert.match(html, /小任务 · 草图/);
 assert.match(html, /小任务 · 导出/);
-assert.match(html, /独立任务/);
+assert.match(html, /历史任务（未区分大小）/);
+assert.match(html, /按原任务得分计入，不推测归属/);
+assert.match(html, /历史任务 · 整理文档/);
 assert.match(html, /整理文档/);
 assert.equal((html.match(/2 点|3 点|1 点/g) || []).length, 3);
 assert.doesNotMatch(html, /<strong>5 点<\/strong>/);
 assert.match(source, /data-open-today-score[\s\S]*?showModal\(\)/);
 assert.match(page, /<dialog id="today-score-dialog" aria-labelledby="today-score-heading">/);
 assert.match(page, /<button id="close-today-score" type="button">关闭<\/button>/);
+assert.match(page, /历史未分类任务按原记录计分/);
 assert.doesNotMatch(page, /class="today-score-details"/);
 
 console.log("TODAY_SCORE_DETAILS_OK");
