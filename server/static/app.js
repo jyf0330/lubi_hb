@@ -2,6 +2,10 @@ let dashboardGroups = [];
 let dashboardScores = [];
 let dashboardFirstSubmissionScores = [];
 let dashboardProgress = [];
+let dashboardTimelineEvents = [];
+let dashboardTimelineSessions = [];
+let dashboardTimelineProgress = [];
+let dashboardServerTime = 0;
 let dashboardDate = "";
 let dashboardApiRoot = null;
 let ownerLoggedIn = false;
@@ -135,6 +139,105 @@ function heartbeatText(item) {
   const status = item.report_status || "进展";
   const detail = item.summary && item.summary !== status ? `：${item.summary}` : "";
   return `${status}${detail}`;
+}
+
+function timelineEventKind(eventType) {
+  if (/评分|得分/.test(eventType)) return "score";
+  if (/提交|审核|验收|退回|撤回/.test(eventType)) return "review";
+  if (/计时/.test(eventType)) return "work";
+  return "task";
+}
+function timelineEventDetail(event) {
+  if (!event.detail) {
+    if (event.from_status && event.to_status && event.from_status !== event.to_status)
+      return `${event.from_status} → ${event.to_status}`;
+    return event.to_status || "任务记录已更新";
+  }
+  try {
+    const detail = JSON.parse(event.detail);
+    if (detail && typeof detail === "object") {
+      if (event.event_type === "管理员调整最终得分")
+        return `${detail.previous_points ?? "未打分"} → ${detail.points} 点 · ${detail.reason || "负责人调整"}`;
+      if (detail.points !== undefined)
+        return `${detail.points} 点${detail.reason ? ` · ${detail.reason}` : ""}`;
+      if (detail.reason) return detail.reason;
+    }
+  } catch {}
+  return event.detail;
+}
+function workingMinutesForDate(session, date) {
+  const weekday = new Date(`${date}T12:00:00+08:00`).getUTCDay();
+  if (weekday === 0 || weekday === 6) return 0;
+  const end = Math.min(Number(session.ended_at || dashboardServerTime || Date.now()), Date.parse(`${date}T23:59:59.999+08:00`));
+  const start = Math.max(Number(session.started_at), Date.parse(`${date}T00:00:00+08:00`));
+  if (end <= start) return 0;
+  return [["09:30:00", "12:00:00"], ["14:00:00", "18:30:00"]].reduce((minutes, window) => {
+    const from = Math.max(start, Date.parse(`${date}T${window[0]}+08:00`));
+    const to = Math.min(end, Date.parse(`${date}T${window[1]}+08:00`));
+    return minutes + Math.max(0, Math.floor((to - from) / 60000));
+  }, 0);
+}
+function timelineAttention(tasks, date, assignee) {
+  if (date !== dashboardDate) return [];
+  const scoped = tasks.filter((task) => !assignee || task.assignee === assignee);
+  const attention = [];
+  for (const task of scoped) {
+    if (task.status === "阻塞") attention.push({task, tone:"danger", title:"任务阻塞", detail:task.blocked_reason || "等待处理阻塞原因"});
+    if (task.status === "需修改") attention.push({task, tone:"warning", title:"等待返工", detail:task.acceptance_result || "请查看验收要求"});
+    if (task.checkin?.due) attention.push({task, tone:"warning", title:"HB 已到期", detail:`已超过汇报节点 ${task.checkin.overdue_minutes} 分钟`});
+    if (task.effort_status === "超出预估" && !["已完成", "已关闭"].includes(task.status)) attention.push({task, tone:"warning", title:"已超出预估", detail:timing(task)});
+    if (task.status === "待验收" && !(task.attachments || []).length && !(task.deliverables || []).length)
+      attention.push({task, tone:"info", title:"交付证据待核对", detail:"没有附件或交付链接，请核对完成说明是否足够验收"});
+  }
+  return attention;
+}
+function renderTimeline() {
+  const date = document.querySelector("#timeline-date").value || dashboardDate;
+  const assignee = document.querySelector("#timeline-person").value;
+  const kind = document.querySelector("#timeline-kind").value;
+  const query = document.querySelector("#timeline-search").value.trim().toLowerCase();
+  const members = assignee ? [assignee] : ["ZHC", "YWT", "YWH"];
+  const sessions = dashboardTimelineSessions.filter((session) => shanghaiDate(session.started_at) <= date && shanghaiDate(session.ended_at || dashboardServerTime || Date.now()) >= date);
+  const progresses = dashboardTimelineProgress.filter((item) => shanghaiDate(item.created_at) === date);
+  const rawEvents = dashboardTimelineEvents.filter((item) => shanghaiDate(item.created_at) === date && item.event_type !== "30分钟汇报" && !/计时/.test(item.event_type));
+  const events = [
+    ...sessions.map((session) => ({
+      task_id:session.task_id, assignee:session.assignee, title:session.title, type:"work",
+      label:session.ended_at ? "计时记录" : "正在计时", created_at:session.started_at,
+      detail:`${session.ended_at ? `${clock(session.started_at)}–${clock(session.ended_at)}` : `${clock(session.started_at)} 开始`} · 当日有效 ${workingMinutesForDate(session,date)} 分钟${session.end_reason ? ` · ${session.end_reason}` : ""}`,
+    })),
+    ...progresses.map((item) => ({
+      task_id:item.task_id, assignee:item.assignee, title:item.title, type:"progress", label:item.report_status || "HB 进展", created_at:item.created_at,
+      detail:`${item.summary || "未填写说明"}${item.progress_percent == null ? "" : ` · ${item.progress_percent}%`}${item.next_step ? ` · 下一步：${item.next_step}` : ""}${item.blocker ? ` · 问题：${item.blocker}` : ""}`,
+      images:item.images || [], attachments:item.attachments || [],
+    })),
+    ...rawEvents.map((item) => ({
+      ...item, type:timelineEventKind(item.event_type), label:item.event_type, detail:timelineEventDetail(item),
+    })),
+  ].filter((item) => (!assignee || item.assignee === assignee) && (!kind || item.type === kind) && (!query || `${item.title} ${item.label} ${item.detail}`.toLowerCase().includes(query)))
+    .sort((a,b) => Number(b.created_at) - Number(a.created_at));
+  const tasks = dashboardTasks;
+  const attention = timelineAttention(tasks, date, assignee);
+  document.querySelector("#timeline-summary").innerHTML = members.map((id) => {
+    const ownSessions = sessions.filter((item) => item.assignee === id);
+    const taskCount = new Set(ownSessions.map((item) => item.task_id)).size;
+    const minutes = ownSessions.reduce((sum,item) => sum + workingMinutesForDate(item,date), 0);
+    const hbCount = progresses.filter((item) => item.assignee === id).length;
+    const score = dashboardScores.find((item) => item.date === date && item.assignee === id) || {};
+    const current = date === dashboardDate ? tasks.filter((item) => item.assignee === id && item.status === "进行中" && !item.is_paused).length : 0;
+    const ownAttention = timelineAttention(tasks,date,id).length;
+    return `<button type="button" class="timeline-person-summary ${id.toLowerCase()}${assignee===id?' selected':''}" data-timeline-person="${id}" aria-pressed="${assignee===id}"><span class="timeline-person-title"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${date===dashboardDate ? `${current} 项正在计时` : `${date} 记录`}</strong></span></span><span class="timeline-person-metrics"><span><b>${taskCount}</b> 项任务</span><span><b>${minutes}</b> 分钟</span><span><b>${hbCount}</b> 次 HB</span><span><b>${score.completed_count || 0}</b> 项完成</span><span><b>${formatPoints(score.points || 0)}</b> 点</span></span>${ownAttention?`<span class="timeline-person-warning">${ownAttention} 项待关注</span>`:'<span class="timeline-person-ok">当前无待处理异常</span>'}</button>`;
+  }).join("");
+  document.querySelector("#timeline-result-count").textContent = `${date} · ${events.length} 条记录`;
+  document.querySelector("#timeline-feed-note").textContent = assignee ? names[assignee] : "全部员工";
+  document.querySelector("#sessions").innerHTML = events.length ? events.map((item) => {
+    const evidence = (item.images?.length || item.attachments?.length) ? ` · 附件 ${(item.images?.length || 0) + (item.attachments?.length || 0)} 个` : "";
+    return `<button type="button" class="timeline-event kind-${item.type}" data-task-id="${esc(item.task_id)}"><span class="timeline-event-time"><time>${clock(item.created_at)}</time><span>${esc(names[item.assignee] || item.assignee)}</span></span><span class="timeline-event-mark" aria-hidden="true"></span><span class="timeline-event-copy"><span class="timeline-event-label">${esc(item.label)}</span><strong>${esc(item.title)}</strong><span>${esc(item.detail)}${esc(evidence)}</span></span><span class="detail-link">任务详情 →</span></button>`;
+  }).join("") : '<div class="empty">当前筛选条件下没有工作记录。</div>';
+  document.querySelector("#timeline-attention-count").textContent = attention.length;
+  document.querySelector("#timeline-attention").innerHTML = date !== dashboardDate
+    ? '<div class="empty-timeline-attention">历史日期展示事实记录；待处理提醒以今天的当前状态为准。</div>'
+    : attention.length ? attention.map((item) => `<button type="button" class="timeline-alert ${item.tone}" data-task-id="${esc(item.task.id)}"><span>${esc(item.title)}</span><strong>${esc(item.task.title)}</strong><small>${esc(names[item.task.assignee] || item.task.assignee)} · ${esc(item.detail)}</small></button>`).join("") : '<div class="empty-timeline-attention">当前没有阻塞、返工、HB 超时或交付证据提醒。</div>';
 }
 
 function shanghaiSeconds(date = new Date()) {
@@ -328,6 +431,15 @@ async function refresh() {
   dashboardScores = data.scores || [];
   dashboardFirstSubmissionScores = data.first_submission_scores || [];
   dashboardDate = data.date;
+  dashboardServerTime = Number(data.server_time || Date.now());
+  dashboardTimelineEvents = data.timeline_events || [];
+  dashboardTimelineSessions = data.timeline_sessions || data.sessions || [];
+  dashboardTimelineProgress = data.timeline_progress || data.progress_updates || [];
+  if (!document.querySelector("#timeline-date").value) {
+    document.querySelector("#timeline-date").value = dashboardDate;
+    document.querySelector("#timeline-date").max = dashboardDate;
+    document.querySelector("#timeline-date").min = shanghaiDate(Date.parse(`${dashboardDate}T00:00:00+08:00`) - 6 * 86400000);
+  }
   const tasks = data.tasks.map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
   detectReworks(tasks);
   const sessions = data.sessions;
@@ -416,25 +528,7 @@ async function refresh() {
       return `<article class="daily-card"><div class="daily-title"><strong>${esc(names[id])}</strong><span>${list.length} 项</span></div>${list.length ? `<ul>${list.map((t) => `<li><b>${esc(t.title)}</b><small>${esc(t.type)} · ${t.estimated_minutes} 分钟</small></li>`).join("")}</ul>` : "<p>尚未安排明日任务</p>"}</article>`;
     })
     .join("");
-  document.querySelector("#sessions").innerHTML = ["ZHC", "YWT"]
-    .map((id) => {
-      const ownSessions = sessions.filter((session) => session.assignee === id);
-      return `<section class="timeline-column ${id.toLowerCase()}">
-        <header class="timeline-column-heading">
-          <span class="timeline-person-mark">${id}</span>
-          <div><strong>${esc(names[id] || id)}</strong><span>${ownSessions.length} 条记录</span></div>
-        </header>
-        <div class="timeline-session-list">${ownSessions.length
-          ? ownSessions
-              .map(
-                (s) =>
-                  `<button type="button" class="timeline-session ${s.ended_at ? "done" : "active"}" data-task-id="${esc(s.task_id)}"><span class="timeline-session-meta"><time>${clock(s.started_at)}</time><span>${s.ended_at ? "已结束" : "进行中"}</span></span><span class="timeline-task"><span></span><strong>${esc(s.title)} · ${s.ended_at ? `有效工时 ${s.recorded_minutes} 分钟` : `已记录 ${s.recorded_minutes} 分钟`}</strong></span><span class="detail-link">查看任务详情 →</span></button>`,
-              )
-              .join("")
-          : '<div class="empty-timeline">今日暂无计时记录</div>'}</div>
-      </section>`;
-    })
-    .join("");
+  renderTimeline();
   const actionSections = collectPriorityActionSections(tasks, dashboardGroups);
   const actionCount = new Set(
     PRIORITY_STATUSES.flatMap((status) => actionSections[status].map((entry) => entry.key)),
@@ -587,6 +681,15 @@ function renderClosedTasks(){
   document.querySelector('#closed-count').textContent=`${list.length} 项`;
   document.querySelector('#closed-tasks').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.close_reason||'管理员关闭')}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">已关闭</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">目前没有已关闭的任务</div>';
 }
+function renderTaskEvidence(t){
+  const deliverables = (t.deliverables || []).map((item) => `<li><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label || item.kind || "交付链接")} ↗</a></li>`).join("");
+  const progress = dashboardTimelineProgress.filter((item) => item.task_id === t.id).slice(0,8);
+  const events = dashboardTimelineEvents.filter((item) => item.task_id === t.id && item.event_type !== "30分钟汇报").slice(0,12);
+  const progressHtml = progress.length ? `<section class="detail-activity"><h4>HB 进展</h4>${progress.map((item) => `<article><header><time>${shanghaiDate(item.created_at)} ${clock(item.created_at)}</time><span>${esc(item.report_status || "进展")}</span></header><p>${esc(item.summary || "未填写具体说明")}</p>${item.next_step?`<small>下一步：${esc(item.next_step)}</small>`:""}${item.blocker?`<small class="blocker">问题：${esc(item.blocker)}</small>`:""}${reportImageGallery(item.images,dashboardApiRoot)}${reportFileGallery(item.attachments,dashboardApiRoot)}</article>`).join("")}</section>` : "";
+  const eventsHtml = events.length ? `<section class="detail-activity"><h4>任务操作记录</h4>${events.map((item) => `<article class="detail-event"><header><time>${shanghaiDate(item.created_at)} ${clock(item.created_at)}</time><span>${esc(names[item.actor] || item.actor)}</span></header><strong>${esc(item.event_type)}</strong><p>${esc(timelineEventDetail(item))}</p></article>`).join("")}</section>` : "";
+  const evidence = deliverables || (t.attachments || []).length ? `<section class="detail-evidence"><h4>交付证据</h4>${deliverables?`<ul>${deliverables}</ul>`:""}${taskAttachmentGallery(t.attachments,dashboardApiRoot)}</section>` : '<section class="detail-evidence empty-evidence"><h4>交付证据</h4><p>暂未上传附件或交付链接，可结合完成说明与 HB 记录验收。</p></section>';
+  return evidence + progressHtml + eventsHtml;
+}
 function showDetail(id){
   const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
   let appendReason='';if(t.notes){try{appendReason=JSON.parse(t.notes).append_reason||'';}catch{}}
@@ -600,7 +703,7 @@ function showDetail(id){
   const content=document.querySelector('#detail-content');
   const canClose=ownerLoggedIn&&['阻塞','需修改'].includes(t.status);
   content.classList.toggle('has-review',canReview||canClose||canEditScore);
-  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+taskAttachmentGallery(t.attachments, dashboardApiRoot)+'</section>'+(canReview||canClose||canEditScore?'<aside class="detail-side" id="detail-side"></aside>':'');
+  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+renderTaskEvidence(t)+'</section>'+(canReview||canClose||canEditScore?'<aside class="detail-side" id="detail-side"></aside>':'');
   appendReviewForm(t);
   appendCloseTaskForm(t);
   appendScoreEditForm(t);
@@ -626,9 +729,13 @@ async function reviewGroup(groupId,button){
   try{await ownerApi('action',{action:'owner_review_group',args:{group_id:group.id}});await loadDashboard();}
   catch(error){alert(error.message);button.disabled=false;}
 }
-for(const id of ['kanban','closed-tasks','actions','progress-pending','sessions'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+for(const id of ['kanban','closed-tasks','actions','progress-pending','sessions','timeline-attention'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#daily-completion-scores').onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+for(const id of ['timeline-date','timeline-person','timeline-kind','timeline-search'])document.getElementById(id).addEventListener('input',renderTimeline);
+document.querySelector('#timeline-clear').onclick=()=>{document.querySelector('#timeline-date').value=dashboardDate;document.querySelector('#timeline-person').value='';document.querySelector('#timeline-kind').value='';document.querySelector('#timeline-search').value='';renderTimeline();};
+document.querySelector('#timeline-summary').onclick=event=>{const card=event.target.closest('[data-timeline-person]');if(!card)return;const select=document.querySelector('#timeline-person');select.value=select.value===card.dataset.timelinePerson?'':card.dataset.timelinePerson;renderTimeline();};
+document.querySelector('#timeline-score-jump').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'start'});
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 document.querySelector('[data-score-details]').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'center'});
 function showProgressDetail(assignee){
@@ -662,7 +769,7 @@ function renderScoreHistory(scoreRows=dashboardScores,tasks=dashboardTasks,first
     const people=Object.keys(names).map(member=>{
       const row=dayRows.find(item=>item.assignee===member)||{points:0,completed_count:0,unscored_count:0};
       const own=dayTasks.filter(task=>task.assignee===member).sort((a,b)=>Number(b.completed_at)-Number(a.completed_at));
-      const list=own.length?`<ul>${own.map(task=>`<li><button type="button" class="score-task" data-task-id="${esc(task.id)}"><span><b>${esc(task.title)}</b><small>${task.group_title?`小任务 · 所属大任务：${esc(task.group_title)} · `:'历史任务（未区分大小） · '}${esc(taskLifecycleMeta(task))}</small></span><strong class="score-value">${task.awarded_points==null?'未打分':formatPoints(task.awarded_points)+' 点'}</strong></button></li>`).join('')}</ul>`:'<p class="score-empty">当天没有审核通过的任务</p>';
+      const list=own.length?`<ul>${own.map(task=>`<li><button type="button" class="score-task" data-task-id="${esc(task.id)}"><span><b>${esc(task.title)}</b><small>${task.group_title?`小任务 · 所属大任务：${esc(task.group_title)} · `:'历史任务（未区分大小） · '}${clock(task.completed_at)} 审核通过</small></span><strong class="score-value">${task.awarded_points==null?'未打分':formatPoints(task.awarded_points)+' 点'}</strong></button></li>`).join('')}</ul>`:'<p class="score-empty">当天没有审核通过的任务</p>';
       return `<section class="score-person"><header><h4>${esc(names[member])}</h4><strong>${row.completed_count||0} 项 · ${formatPoints(row.points||0)} 点</strong></header>${list}${row.unscored_count?`<p class="score-warning">${row.unscored_count} 项历史任务未记录最终分数</p>`:''}</section>`;
     }).join('');
     return `<details class="daily-score-day"${date===currentDate?' open':''}><summary><span><b>${esc(date)}</b>${date===currentDate?'<small>今天</small>':''}</span><strong>${totalTasks} 项 · ${formatPoints(totalPoints)} 点</strong></summary><p class="score-rule">大任务只负责归类与汇总，不单独计分；下列小任务的最终得分只相加一次。${unscored?`另有 ${unscored} 项历史任务未记录分数。`:''}</p><div class="daily-score-people">${people}</div></details>`;

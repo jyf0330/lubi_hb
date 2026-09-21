@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=ai-team-analysis-20260921"><link rel="stylesheet" href="report-images.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=timeline-command-center-20260921"><link rel="stylesheet" href="report-images.css"></head>
 <body><header class="topbar"><div class="mark">☀</div><div><h1>露比工作室</h1><p>团队管理工作台</p></div><span id="today" class="date"></span><a class="employee-link" href="employee">姓名登录 · 我的信息 ↗</a></header>
 <main><div class="page-heading"><div><span class="eyebrow">掌握进展，及时支持</span><h2>团队工作，一目了然</h2></div><div class="refresh-tools"><span id="sync-status" role="status">正在读取最新记录…</span><button type="button" id="refresh-dashboard">刷新数据</button></div></div>
 <nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-closed" aria-controls="closed" aria-selected="false" tabindex="-1" data-page="closed">关闭任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button><button type="button" role="tab" id="nav-ai-analysis" aria-controls="ai-analysis" aria-selected="false" tabindex="-1" data-page="ai-analysis">AI 分析</button></nav><p id="load-error" role="alert" hidden></p>
@@ -105,15 +105,34 @@
             <div id="tomorrow" class="daily-grid"></div>
           </div>
         </div>
-      </section><section class="panel" id="timeline" role="tabpanel" aria-labelledby="nav-timeline" hidden>
+      </section><section class="panel timeline-dashboard" id="timeline" role="tabpanel" aria-labelledby="nav-timeline" hidden>
           <header>
             <div>
-              <small>计时记录</small>
-              <h2>今日工作轨迹</h2>
+              <small>员工工作事实与管理入口</small>
+              <h2>工作轨迹</h2>
             </div>
+            <span id="timeline-result-count" aria-live="polite"></span>
           </header>
-          <div id="sessions" class="timeline-columns" aria-label="今日成员工作轨迹"></div>
-          <p class="footnote">有效工时只计算周一至周五 09:30–12:00、14:00–18:30；午休、下班和周末自动暂停累计。</p>
+          <div class="timeline-filters" aria-label="工作轨迹筛选">
+            <label>日期<input id="timeline-date" type="date" aria-label="选择轨迹日期"></label>
+            <label>员工<select id="timeline-person"><option value="">全部员工</option><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label>
+            <label>记录类型<select id="timeline-kind"><option value="">全部记录</option><option value="work">计时</option><option value="progress">HB 进展</option><option value="review">提交与验收</option><option value="score">评分</option><option value="task">任务变化</option></select></label>
+            <label class="search-field">搜索任务<input id="timeline-search" type="search" placeholder="任务名、进展或处理说明"></label>
+            <button id="timeline-clear" type="button">重置</button>
+          </div>
+          <div id="timeline-summary" class="timeline-summary" aria-label="员工工作概览"></div>
+          <div class="timeline-workspace">
+            <section class="timeline-feed-panel" aria-labelledby="timeline-feed-heading">
+              <div class="timeline-section-heading"><div><small>按时间倒序</small><h3 id="timeline-feed-heading">统一工作记录</h3></div><span id="timeline-feed-note"></span></div>
+              <div id="sessions" class="timeline-feed" aria-label="员工统一工作轨迹"></div>
+            </section>
+            <aside class="timeline-attention-panel" aria-labelledby="timeline-attention-heading">
+              <div class="timeline-section-heading"><div><small>负责人待处理</small><h3 id="timeline-attention-heading">异常与关注</h3></div><b id="timeline-attention-count" class="count">0</b></div>
+              <div id="timeline-attention"></div>
+              <button type="button" id="timeline-score-jump" class="timeline-score-jump">查看每日完成任务与得分 →</button>
+            </aside>
+          </div>
+          <p class="footnote">轨迹合并计时、HB、提交、验收和评分记录；点击任意记录进入任务详情。有效工时按工作日上班时段计算，并行工作按任务分别保留。</p>
         </section>
 <section class="panel ai-analysis" id="ai-analysis" role="tabpanel" aria-labelledby="nav-ai-analysis" hidden>
   <header>
@@ -144,4 +163,4 @@
 <section class="panel" id="score-history-panel"><header><div><small>按审核通过日期统计</small><h2>每日完成任务与最终得分</h2></div><span>近 7 天</span></header><p class="panel-hint score-explanation">每位员工每天完成了哪些任务、每项最终得到多少分都在下面。大任务只是小任务的汇总，不会额外叠加一遍分数。</p><div id="daily-completion-scores" class="daily-completion-scores"></div><details class="first-submission-history"><summary>查看员工首次提交自评分 · 近 5 个工作日</summary><p>这份辅助记录按首次提交待验收的日期统计；退回后重提和管理员覆盖最终分数都不会改写它。</p><div id="score-history" class="score-history"></div></details></section>
 <dialog id="task-detail"><div class="detail-heading"><h2>任务详情</h2><button id="close-detail" type="button">关闭</button></div><div id="detail-content"></div></dialog>
 <dialog id="progress-detail"><div class="detail-heading"><h2 id="progress-detail-title">汇报详情</h2><button id="close-progress-detail" type="button">关闭</button></div><div id="progress-detail-content"></div></dialog>
-</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=ai-team-analysis-20260921" defer></script></body></html>
+</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=timeline-command-center-20260921" defer></script></body></html>

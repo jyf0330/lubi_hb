@@ -905,6 +905,17 @@ def enrich_dashboard_tasks(db, tasks, timestamp):
         for task in tasks:
             task["time_sessions"] = task_sessions.get(task["id"], [])
     task_files.attach_metadata(db, tasks)
+    if tasks:
+        task_ids = [task["id"] for task in tasks]
+        placeholders = ",".join("?" for _ in task_ids)
+        by_task = {task["id"]: task for task in tasks}
+        for task in tasks:
+            task["deliverables"] = []
+        for row in db.execute(
+            f"SELECT id, task_id, kind, label, url, created_at FROM deliverables WHERE task_id IN ({placeholders}) ORDER BY created_at",
+            task_ids,
+        ).fetchall():
+            by_task[row["task_id"]]["deliverables"].append(dict(row))
     closed_ids = [task["id"] for task in tasks if task["status"] == "已关闭"]
     if closed_ids:
         placeholders = ",".join("?" for _ in closed_ids)
@@ -942,14 +953,43 @@ def dashboard_data() -> dict[str, object]:
             ORDER BY p.created_at DESC LIMIT 60""",
             (day_start_ms(), day_start_ms(1)),
         ).fetchall()]
+        timeline_start = day_start_ms(-6)
+        timeline_events = [dict(row) for row in db.execute(
+            """SELECT e.id, e.task_id, e.actor, e.event_type, e.from_status,
+                      e.to_status, e.detail, e.created_at, t.title, t.assignee, t.type
+               FROM task_events e JOIN tasks t ON t.id = e.task_id
+               WHERE e.created_at >= ? AND e.created_at < ?
+               ORDER BY e.created_at DESC LIMIT 500""",
+            (timeline_start, day_start_ms(1)),
+        ).fetchall()]
+        timeline_sessions = [dict(row) for row in db.execute(
+            """SELECT ws.*, t.title, t.type, t.status
+               FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id
+               WHERE ws.started_at < ? AND (ws.ended_at IS NULL OR ws.ended_at > ?)
+               ORDER BY ws.started_at DESC LIMIT 500""",
+            (day_start_ms(1), timeline_start),
+        ).fetchall()]
+        for session in timeline_sessions:
+            clipped_start = max(int(session["started_at"]), timeline_start)
+            clipped_end = min(int(session["ended_at"] or timestamp), day_start_ms(1))
+            session["recorded_minutes"] = working_minutes_between(clipped_start, clipped_end)
+        timeline_progress = [dict(row) for row in db.execute(
+            """SELECT p.*, t.title, t.type FROM progress_updates p
+               JOIN tasks t ON t.id = p.task_id
+               WHERE p.created_at >= ? AND p.created_at < ?
+               ORDER BY p.created_at DESC LIMIT 300""",
+            (timeline_start, day_start_ms(1)),
+        ).fetchall()]
         scores = workflow.daily_scores(db, today())
         first_submission_scores = workflow.first_submission_scores(db, today())
         report_images.attach_metadata(db, progress_updates)
         report_files.attach_metadata(db, progress_updates)
+        report_images.attach_metadata(db, timeline_progress)
+        report_files.attach_metadata(db, timeline_progress)
         groups = task_groups(db)
         reports = [dict(row) for row in db.execute("SELECT assignee, summary, submitted_at FROM daily_reports WHERE report_date = ? ORDER BY assignee", (today(),)).fetchall()]
         tomorrow_tasks = [dict(row) for row in db.execute("SELECT id, assignee, title, type, status, estimated_minutes, planned_points FROM tasks WHERE planned_date = ? ORDER BY assignee, created_at", (date_string(1),)).fetchall()]
-    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 def analysis_context(period: str) -> dict[str, object]:

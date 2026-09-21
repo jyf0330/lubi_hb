@@ -24,8 +24,8 @@ assert.match(
 assert.match(app, /\(canReview\|\|canClose\|\|canEditScore\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
 assert.match(app, /function appendScoreEditForm\(t\)/);
 assert.match(app, /action:'owner_set_task_score'/);
-assert.match(app, /class="timeline-session \$\{s\.ended_at \? "done" : "active"\}" data-task-id="\$\{esc\(s\.task_id\)\}"/);
-assert.match(app, /'progress-pending','sessions'\]\)document\.getElementById\(id\)\.onclick/);
+assert.match(app, /class="timeline-event kind-\$\{item\.type\}" data-task-id="\$\{esc\(item\.task_id\)\}"/);
+assert.match(app, /'sessions','timeline-attention'\]\)document\.getElementById\(id\)\.onclick/);
 // 审核表单必须落在右栏容器内，而不是直接塞进 #detail-content。
 assert.match(
   app,
@@ -37,7 +37,7 @@ assert.match(css, /#task-detail\s*\{[^}]*width:\s*min\(1080px/);
 assert.match(css, /#detail-content\.has-review\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.5fr\)/);
 assert.match(css, /\.detail-fields dd\.is-clamped\s*\{[^}]*line-clamp:\s*3/);
 assert.match(css, /\.detail-expand\s*\{/);
-assert.match(css, /\.timeline-session:hover\s*\{/);
+assert.match(css, /\.timeline-event:hover\s*\{/);
 assert.match(css, /@media \(max-width: 900px\)\s*\{\s*#detail-content\.has-review\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 
 // 静态资源缓存键必须随改动更新，否则浏览器会继续用旧缓存。
