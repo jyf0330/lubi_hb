@@ -624,7 +624,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             assessment = time_assessment(task["estimated_minutes"], minutes, task["deadline_at"], timestamp)
             if assessment["effort_status"] != "超出预估":
                 variance_reason = None
-            db.execute("UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?, variance_reason = ?, submitted_at = ?, first_submitted_at = COALESCE(first_submitted_at, ?), updated_at = ? WHERE id = ?", (summary, variance_reason, timestamp, timestamp, timestamp, task_id))
+            db.execute("UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?, variance_reason = ?, submitted_at = ?, first_submitted_points = CASE WHEN first_submitted_at IS NULL THEN ? ELSE first_submitted_points END, first_submitted_at = COALESCE(first_submitted_at, ?), updated_at = ? WHERE id = ?", (summary, variance_reason, timestamp, employee_score, timestamp, timestamp, task_id))
             event(db, task_id, member, "提交验收", "进行中", "待验收", summary, timestamp)
             db.executemany(
                 "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",
@@ -930,12 +930,13 @@ def dashboard_data() -> dict[str, object]:
             (day_start_ms(), day_start_ms(1)),
         ).fetchall()]
         scores = workflow.daily_scores(db, today())
+        first_submission_scores = workflow.first_submission_scores(db, today())
         report_images.attach_metadata(db, progress_updates)
         report_files.attach_metadata(db, progress_updates)
         groups = task_groups(db)
         reports = [dict(row) for row in db.execute("SELECT assignee, summary, submitted_at FROM daily_reports WHERE report_date = ? ORDER BY assignee", (today(),)).fetchall()]
         tomorrow_tasks = [dict(row) for row in db.execute("SELECT id, assignee, title, type, status, estimated_minutes, planned_points FROM tasks WHERE planned_date = ? ORDER BY assignee, created_at", (date_string(1),)).fetchall()]
-    return {"scores": scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 class Handler(BaseHTTPRequestHandler):

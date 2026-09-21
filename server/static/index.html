@@ -13,8 +13,8 @@
           <span>未完成任务</span><b id="planned">—</b
           ><small>包含跨天任务</small>
         </article>
-        <button type="button" id="score-metric" class="metric metric-link" data-score-details aria-label="查看今日审核得分明细">
-          <span>今日审核得分</span><b id="done">—</b><small id="rate">点击查看任务明细 →</small>
+        <button type="button" id="score-metric" class="metric metric-link" data-score-details aria-label="查看近 5 个工作日审核得分明细">
+          <span>近 5 个工作日审核得分</span><b id="done">—</b><small id="rate">点击查看每天的分数 →</small>
         </button>
         <button type="button" class="metric metric-link" data-status-jump="待验收">
           <span>待验收</span><b id="review-count">—</b
@@ -116,8 +116,7 @@
           <p class="footnote">有效工时只计算周一至周五 09:30–12:00、14:00–18:30；午休、下班和周末自动暂停累计。</p>
         </section>
 <section class="panel" id="owner-controls"><h2>管理员操作</h2><p id="owner-identity">余文浩登录后自动启用管理员权限。</p><form id="owner-login"><label>姓名<input name="name" required autocomplete="name" maxlength="20"></label><button>登录管理员</button></form><form id="insert-task" hidden><h3>临时插单</h3><label>员工<select name="assignee"><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label><label>任务名称<input name="title" required maxlength="120"></label><label>预期分钟（通常不超过 120）<input name="estimated_minutes" type="number" min="1" max="1440" value="120" required></label><label>验收要求<textarea name="acceptance_criteria" required maxlength="800"></textarea></label><button>插入任务，等待员工标高</button></form><p id="owner-notice" role="status"></p></section>
-<section class="panel"><h2>每日审核得分 · 近 7 天</h2><p>按审核通过日期计分；跨天任务保留。旧任务未打分不折算，点数不代表出勤时长。</p><div id="score-history" class="score-history"></div></section>
+<section class="panel" id="score-history-panel"><h2>近 5 个工作日审核得分</h2><p>按员工首次提交待验收的日期统计，分数取首次提交时的员工自评分。退回后重提和管理员审核时覆盖分数都不改写首次分数；无法从历史记录还原的首次分数会标为未记录。</p><div id="score-history" class="score-history"></div></section>
 <dialog id="task-detail"><div class="detail-heading"><h2>任务详情</h2><button id="close-detail" type="button">关闭</button></div><div id="detail-content"></div></dialog>
-<dialog id="score-detail"><div class="detail-heading"><h2>今日审核得分明细</h2><button id="close-score-detail" type="button">关闭</button></div><div id="score-detail-content"></div></dialog>
 <dialog id="progress-detail"><div class="detail-heading"><h2 id="progress-detail-title">汇报详情</h2><button id="close-progress-detail" type="button">关闭</button></div><div id="progress-detail-content"></div></dialog>
-</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=priority-tabs-20260921" defer></script></body></html>
+</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=first-submission-scores-20260921" defer></script></body></html>

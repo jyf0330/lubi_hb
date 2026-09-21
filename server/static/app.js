@@ -321,7 +321,7 @@ async function refresh() {
   if (!response.ok) throw new Error("服务器数据读取失败");
   const data = await response.json();
   dashboardGroups = data.groups || [];
-  dashboardScores = data.scores || [];
+  dashboardScores = data.first_submission_scores || [];
   dashboardDate = data.date;
   renderScoreHistory();
   const tasks = data.tasks.map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
@@ -334,23 +334,19 @@ async function refresh() {
       session = active
         ? sessions.find((s) => s.task_id === active.id && !s.ended_at)
         : null,
-      planned = own.filter(t=>t.planned_date===data.date).reduce((a, t) => a + Number(t.planned_points), 0),
-      done = dashboardScores.find(r=>r.date===data.date&&r.assignee===id)?.points || 0;
-    return { id, own, active, session, planned, done };
+      todayFirstScore = dashboardScores.find(r=>r.date===data.date&&r.assignee===id)?.points || 0;
+    return { id, own, active, session, todayFirstScore };
   });
-  const planned = people.reduce((a, p) => a + p.planned, 0),
-    done = people.reduce((a, p) => a + p.done, 0),
+  const recentScore = dashboardScores.reduce((sum, row) => sum + row.points, 0),
     waiting = tasks.filter((t) => t.status === "待验收"),
     blocked = tasks.filter((t) => t.status === "阻塞"),
     active = people.filter(p=>p.own.some(t=>t.status==='进行中'&&!t.is_paused)).length,
-    low = people.filter((p) => p.planned < 6).map((p) => p.id),
     overrun = tasks.filter((t) => t.effort_status === "超出预估"),
     overdue = tasks.filter((t) => t.overdue),
     checkinDue = people.filter((p) => p.active?.checkin?.due);
   document.querySelector("#planned").textContent = `${tasks.filter(t=>t.status!=='已完成').length} 项`;
-  document.querySelector("#done").textContent = `${done} 点`;
-  document.querySelector("#rate").textContent =
-    "点击查看任务明细 →";
+  document.querySelector("#done").textContent = `${formatPoints(recentScore)} 点`;
+  document.querySelector("#rate").textContent = "点击查看每天的分数 →";
   document.querySelector("#review-count").textContent = `${waiting.length} 项`;
   document.querySelector("#blocked-count").textContent = `${blocked.length} 项`;
   document.querySelector("#brief-title").textContent =
@@ -359,17 +355,14 @@ async function refresh() {
     `${tasks.filter(t=>t.priority==='高').length} 项高优先临时插单，${waiting.length} 项等待你审核打分。员工可自行暂停或并行。`;
   document.querySelector("#people").innerHTML = [...people].sort((a,b)=>Number(Boolean(b.session))-Number(Boolean(a.session)))
     .map((p) => {
-      const remaining = Math.max(0, p.planned - p.done),
-        pct = p.planned
-          ? Math.min(100, Math.round((p.done / p.planned) * 100))
-          : 0,
+      const recent = dashboardScores.filter(r=>r.assignee===p.id).reduce((n,r)=>n+r.points,0),
         checkin = checkinMeta(p.active);
       const tag = p.active ? "button" : "article",
         action = p.active
           ? ` type="button" data-person-task-id="${esc(p.active.id)}" aria-label="查看 ${esc(names[p.id])} 的任务详情"`
           : "",
         actionClass = p.active ? " person-action" : "";
-      return `<${tag} class="person ${p.id.toLowerCase()}${actionClass}"${action}><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.session.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日审核得分 ${p.done} 点</span><span>近 7 天 ${dashboardScores.filter(r=>r.assignee===p.id).reduce((n,r)=>n+r.points,0)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p>${p.active ? '<span class="person-detail-link">查看任务详情 →</span>' : ""}</${tag}>`;
+      return `<${tag} class="person ${p.id.toLowerCase()}${actionClass}"${action}><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.session.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日首次提交 ${formatPoints(p.todayFirstScore)} 点</span><span>近 5 个工作日 ${formatPoints(recent)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p>${p.active ? '<span class="person-detail-link">查看任务详情 →</span>' : ""}</${tag}>`;
     })
     .join("");
   const progress = data.progress_updates || [];
@@ -662,7 +655,7 @@ document.querySelector('#progress-people').onclick = (event) => {
 document.querySelector('#close-progress-detail').onclick = () => document.querySelector('#progress-detail').close();
 function renderScoreHistory(){
   const dates=[...new Set(dashboardScores.map(r=>r.date))].reverse();
-  document.querySelector('#score-history').innerHTML='<table><thead><tr><th>日期</th>'+Object.values(names).map(n=>'<th>'+esc(n)+'</th>').join('')+'</tr></thead><tbody>'+dates.map(date=>'<tr><th>'+date+'</th>'+Object.keys(names).map(member=>{const row=dashboardScores.find(r=>r.date===date&&r.assignee===member);return '<td>'+row.points+' 点'+(row.unscored_count?'（'+row.unscored_count+' 项旧任务未打分）':'')+'</td>';}).join('')+'</tr>').join('')+'</tbody></table>';
+  document.querySelector('#score-history').innerHTML='<table><thead><tr><th>日期</th>'+Object.values(names).map(n=>'<th>'+esc(n)+'</th>').join('')+'</tr></thead><tbody>'+dates.map(date=>'<tr><th>'+date+'</th>'+Object.keys(names).map(member=>{const row=dashboardScores.find(r=>r.date===date&&r.assignee===member);return '<td>'+row.points+' 点'+(row.unscored_count?'（'+row.unscored_count+' 项首次分数未记录）':'')+'</td>';}).join('')+'</tr>').join('')+'</tbody></table>';
 }
 async function ownerApi(path,data){
   const response=await fetch('api/employee/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Team-Request':'employee'},body:JSON.stringify(data)});

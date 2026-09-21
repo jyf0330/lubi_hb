@@ -21,7 +21,7 @@ def points(value):
 
 def migrate(db):
     columns = {r[1] for r in db.execute('PRAGMA table_info(tasks)')}
-    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT'), ('first_submitted_at', 'INTEGER')]:
+    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT'), ('first_submitted_at', 'INTEGER'), ('first_submitted_points', 'REAL')]:
         if name not in columns:
             db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {kind}')
     # Keep the first review-submission date stable through rework/withdrawal.
@@ -32,6 +32,17 @@ def migrate(db):
               WHERE task_id = tasks.id AND event_type = '提交验收'),
              CASE WHEN status = '待验收' THEN submitted_at END
            ) WHERE first_submitted_at IS NULL"""
+    )
+    # A single recorded submission lets us recover the employee score from
+    # the task row. Re-submitted legacy tasks have no saved score per event,
+    # so leave the first score unknown instead of substituting the latest one.
+    db.execute(
+        """UPDATE tasks SET first_submitted_points = employee_ai_points
+           WHERE first_submitted_points IS NULL
+             AND first_submitted_at IS NOT NULL
+             AND employee_ai_points IS NOT NULL
+             AND (SELECT COUNT(*) FROM task_events
+                  WHERE task_id = tasks.id AND event_type = '提交验收') <= 1"""
     )
     # Legacy priorities are not owner-authorized inserts; preserve their history.
     for row in db.execute("SELECT id, status, priority FROM tasks WHERE priority != '普通' AND owner_inserted = 0").fetchall():
@@ -174,4 +185,36 @@ def daily_scores(db, report_date, days=7):
         for member in ('ZHC', 'YWT', 'YWH'):
             row = db.execute("SELECT COALESCE(SUM(awarded_points),0), COUNT(*), SUM(CASE WHEN awarded_points IS NULL THEN 1 ELSE 0 END) FROM tasks WHERE assignee=? AND status='已完成' AND completed_at>=? AND completed_at<?", (member, int(start.timestamp()*1000), int(stop.timestamp()*1000))).fetchone()
             result.append({'date':start.strftime('%Y-%m-%d'),'assignee':member,'points':round(row[0],2),'completed_count':row[1],'unscored_count':row[2] or 0})
+    return result
+
+
+def first_submission_scores(db, report_date, days=5):
+    """Return employee self-scores from their first review submission per workday."""
+    day = datetime.strptime(report_date, '%Y-%m-%d').date()
+    workdays = []
+    while len(workdays) < days:
+        if day.weekday() < 5:
+            workdays.append(day)
+        day -= timedelta(days=1)
+    workdays.reverse()
+
+    result = []
+    for workday in workdays:
+        start = datetime.combine(workday, datetime.min.time(), ZoneInfo('Asia/Shanghai'))
+        stop = start + timedelta(days=1)
+        for member in ('ZHC', 'YWT', 'YWH'):
+            row = db.execute(
+                """SELECT COALESCE(SUM(first_submitted_points), 0), COUNT(*),
+                          SUM(CASE WHEN first_submitted_points IS NULL THEN 1 ELSE 0 END)
+                   FROM tasks
+                   WHERE assignee=? AND first_submitted_at>=? AND first_submitted_at<?""",
+                (member, int(start.timestamp()*1000), int(stop.timestamp()*1000)),
+            ).fetchone()
+            result.append({
+                'date': workday.strftime('%Y-%m-%d'),
+                'assignee': member,
+                'points': round(row[0], 2),
+                'submitted_count': row[1],
+                'unscored_count': row[2] or 0,
+            })
     return result
