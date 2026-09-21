@@ -223,6 +223,9 @@ dialog .detail-heading {
 .ai-scope button strong{font-size:15px}
 .ai-scope button span,.ai-scope p{color:var(--muted);font-size:13px}
 .ai-scope p{margin-top:4px;line-height:1.5}
+.ai-auth-gate{display:grid;gap:7px;padding:12px;border:1px solid #d4b99b;border-radius:10px;background:#fff8ed}
+.ai-auth-gate>span{color:var(--muted);font-size:13px}
+.ai-auth-gate button{margin-top:2px;text-align:center;color:white;background:#986044}
 .ai-conversation{display:grid;grid-template-rows:minmax(300px,1fr) auto;min-height:560px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fffefa}
 .ai-messages{display:flex;flex-direction:column;gap:12px;padding:18px;overflow:auto;max-height:620px}
 .ai-message{align-self:flex-start;max-width:min(82%,760px);padding:12px 14px;border-radius:4px 14px 14px;background:#f3eadc}
@@ -230,7 +233,8 @@ dialog .detail-heading {
 .ai-message span{display:block;margin-bottom:5px;color:var(--muted);font-size:12px;font-weight:700}
 .ai-message p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}
 .ai-chat-form{display:grid;gap:7px;padding:14px 16px;border-top:1px solid var(--line);background:#f8f2e9}
-.ai-chat-form>label{font-size:13px;color:var(--muted)}
+.ai-chat-form>label{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted)}
+.ai-chat-form>label span{font-size:12px}
 .ai-chat-form>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
 .ai-chat-form textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:72px;padding:11px 12px;border:1px solid #d7c8b8;border-radius:10px;background:#fffefa;font:inherit;color:var(--ink)}
 .ai-chat-form button{height:44px}

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -23,7 +22,6 @@ SYSTEM_PROMPT = """你是露比工作室负责人的团队经营分析助手。�
 
 _LOCK = threading.Lock()
 _ACTIVE: set[str] = set()
-_LAST: dict[str, float] = {}
 
 
 def validate_messages(messages: object) -> list[dict[str, str]]:
@@ -55,10 +53,9 @@ def generate_analysis(context: dict[str, object], messages: object, member: str 
         raise ValueError("DeepSeek AI 分析尚未配置，请联系维护人员。")
 
     with _LOCK:
-        if member in _ACTIVE or time.monotonic() - _LAST.get(member, -100) < 3:
-            raise ValueError("AI 正在分析或请求过于频繁，请稍后再试。")
+        if member in _ACTIVE:
+            raise ValueError("AI 正在分析，请等待本次回答完成。")
         _ACTIVE.add(member)
-        _LAST[member] = time.monotonic()
 
     try:
         snapshot = json.dumps(context, ensure_ascii=False, separators=(",", ":"))

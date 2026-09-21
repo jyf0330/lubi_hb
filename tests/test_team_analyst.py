@@ -77,7 +77,7 @@ class TeamAnalystTests(unittest.TestCase):
             captured["timeout"] = timeout
             return response
 
-        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key", "DEEPSEEK_MODEL": "deepseek-flash"}), patch.object(team_analyst, "urlopen", side_effect=fake_urlopen), patch.object(team_analyst.time, "monotonic", return_value=100), patch.object(team_analyst, "_LAST", {}):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key", "DEEPSEEK_MODEL": "deepseek-flash"}), patch.object(team_analyst, "urlopen", side_effect=fake_urlopen), patch.object(team_analyst, "_ACTIVE", set()):
             answer = team_analyst.generate_analysis(
                 {"分析范围": "今日", "任务明细": []},
                 [{"role": "user", "content": "分析今天"}],
@@ -89,6 +89,27 @@ class TeamAnalystTests(unittest.TestCase):
         self.assertIn("只读看板快照", captured["body"]["messages"][1]["content"])
         self.assertEqual(captured["body"]["messages"][-1]["content"], "分析今天")
         self.assertNotIn("test-key", json.dumps(captured["body"], ensure_ascii=False))
+
+    def test_immediate_follow_up_is_allowed_after_previous_answer(self):
+        response = FakeResponse({"choices": [{"finish_reason": "stop", "message": {"content": "可以继续追问。"}}]})
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}), patch.object(team_analyst, "urlopen", return_value=response) as request, patch.object(team_analyst, "_ACTIVE", set()):
+            first = team_analyst.generate_analysis(
+                {"分析范围": "今日"},
+                [{"role": "user", "content": "先分析今天"}],
+                member="same-owner",
+            )
+            second = team_analyst.generate_analysis(
+                {"分析范围": "今日"},
+                [
+                    {"role": "user", "content": "先分析今天"},
+                    {"role": "assistant", "content": first},
+                    {"role": "user", "content": "马上继续追问"},
+                ],
+                member="same-owner",
+            )
+
+        self.assertEqual(second, "可以继续追问。")
+        self.assertEqual(request.call_count, 2)
 
     def test_validate_messages_limits_and_requires_user_last(self):
         with self.assertRaises(ValueError):
