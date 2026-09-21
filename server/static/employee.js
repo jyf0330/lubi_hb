@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, editingSubmissionId = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null, dataFreezeDate = null;
+let user = null, items = [], groupCache = [], taskFilter = 'unfinished', busy = false, selected = null, editingSubmissionId = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null, dataFreezeDate = null;
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const taskApiRoot = new URL('../', apiBase);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -147,6 +147,53 @@ function renderEmployeeReminders(tasks){
   }
   $('#employee-reminder-list').innerHTML=reminders.join('');
 }
+function employeeTaskCategory(task){
+  if(task.status==='需修改')return 'rework';
+  if(task.status==='待验收')return 'review';
+  return 'unfinished';
+}
+function renderEmployeeTaskBoard(){
+  const counts={unfinished:0,rework:0,review:0};
+  for(const task of items)counts[employeeTaskCategory(task)]++;
+  for(const key of Object.keys(counts)){
+    $('#task-count-'+key).textContent=counts[key];
+    const button=document.querySelector('[data-task-filter="'+key+'"]');
+    button.setAttribute('aria-pressed',String(taskFilter===key));
+    button.classList.toggle('has-tasks',counts[key]>0);
+  }
+  const visibleItems=items.filter(task=>employeeTaskCategory(task)===taskFilter);
+  const visibleIds=new Set(visibleItems.map(task=>task.id));
+  const running=items.filter(task=>task.status==='进行中'&&!task.is_paused);
+  const labels={unfinished:'未完成',rework:'待修改',review:'待验收'};
+  $('#task-count').textContent=labels[taskFilter]+' '+visibleItems.length+' 项';
+  const renderTask = task => {
+    let buttons='';
+    let appendReason='';
+    if(task.notes){try{const notes=JSON.parse(task.notes);appendReason=notes.append_reason||'';}catch{}}
+    const button=(action,label)=>'<button data-id="'+task.id+'" data-action="'+action+'">'+label+'</button>';
+    if(task.owner_inserted&&task.priority!=='高'&&!['已完成','待验收'].includes(task.status))buttons+=button('work_set_high_priority','标为高优先');
+    if(task.status==='阻塞')buttons+=button('work_unblock_task','解除阻塞');
+    if(['今日待办','需修改'].includes(task.status))buttons+=button('work_start_task','开始');
+    if(task.status==='进行中'){buttons+=button(task.is_paused?'work_resume_task':'work_pause_task',task.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
+    if(task.status==='待验收')buttons+=button('work_update_submission','修改待验收内容')+button('work_withdraw_submission','取消待验收并重写');
+    if(['今日待办','进行中','需修改'].includes(task.status))buttons+=button('work_block_task','遇到阻塞');
+    return '<article class="task '+(task.priority==='高'?'high-priority':'')+'">'+(task.owner_inserted?'<p class="priority-label">'+(task.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(task.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(task.is_paused?'已暂停':task.status==='进行中'&&running.length>1?'进行中 · 并行':task.status)+'</span><h3>'+esc(task.title)+'</h3><p>'+esc(task.type)+' · 预计 '+task.estimated_minutes+' 分钟 · 已记录 '+task.actual_minutes+' 分钟</p><p>'+esc(task.acceptance_result||task.blocked_reason||task.deliverable_expectation||task.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(task.attachments,taskApiRoot)+'<div class="buttons">'+buttons+'</div></article>';
+  };
+  const grouped=groupCache.map(group=>{
+    const visibleTasks=group.tasks.filter(task=>visibleIds.has(task.id));
+    if(!visibleTasks.length)return '';
+    return '<section class="task-group"><div class="group-heading"><span class="badge">'+esc(group.status)+'</span><h3>'+esc(group.title)+'</h3><p>验收通过 '+group.completed_count+' / '+group.total_count+' 项 · '+(group.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+group.stated_minutes+' 分钟')+' · 小任务合计 '+group.estimated_minutes+' 分钟 · 已记录 '+group.actual_minutes+' 分钟</p><p class="hint">当前筛选显示 '+visibleTasks.length+' 项。小任务可独立估时，之后发现漏拆可随时补充。</p><p>'+esc(group.deliverable_expectation)+'</p><details><summary>整体验收标准</summary><p>'+esc(group.acceptance_criteria)+'</p></details><div class="buttons"><button type="button" data-append-group="'+esc(group.id)+'"'+(group.tasks.length>=8?' disabled':'')+'>'+(group.tasks.length>=8?'已达 8 项上限':'补充小任务')+'</button></div></div>'+visibleTasks.map(renderTask).join('')+'</section>';
+  }).join('');
+  const singles=visibleItems.filter(task=>!task.group_id).map(renderTask).join('');
+  const emptyMessages={unfinished:'当前没有未完成任务。',rework:'当前没有待修改任务。',review:'当前没有待验收任务。'};
+  $('#tasks').innerHTML=grouped+singles||'<div class="empty">'+emptyMessages[taskFilter]+'</div>';
+}
+$('#task-status-filters').onclick=event=>{
+  const button=event.target.closest('[data-task-filter]');
+  if(!button)return;
+  taskFilter=button.dataset.taskFilter;
+  renderEmployeeTaskBoard();
+};
 $('#personal-summary').addEventListener('click',event=>{
   if(event.target.closest('[data-open-today-score]'))$('#today-score-dialog').showModal();
 });
@@ -158,7 +205,7 @@ async function refresh(){
   freezeBanner.hidden=!data.freeze_date;
   freezeBanner.textContent=data.freeze_date?'数据冻结已生效：这里只显示 '+data.freeze_date+'（含）之后的新数据，更早记录视为不存在。':'';
   const firstVisit=draftOwner!==user;
-  if(firstVisit){clearHeartbeatImages();$('#heartbeat').reset();draftOwner=user;workPlan=null;planRequestId=null;todoDate=null;todoBaseDate=null;$('#work-text').value=storage('work-source:'+user)||'';previewWork();}
+  if(firstVisit){clearHeartbeatImages();$('#heartbeat').reset();draftOwner=user;taskFilter='unfinished';workPlan=null;planRequestId=null;todoDate=null;todoBaseDate=null;$('#work-text').value=storage('work-source:'+user)||'';previewWork();}
   renderTodoDates(data.date,firstVisit);
   $('#welcome').hidden=true;$('#workspace').hidden=false;$('#logout').hidden=false;$('#identity').textContent=user;$('#greeting').textContent=user+'，今天也一起加油。';
   renderPersonal(data);
@@ -166,26 +213,9 @@ async function refresh(){
   const selectedHeartbeat=$('#heartbeat-task').value;
   $('#heartbeat-task').innerHTML=running.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.title)+'</option>').join('');
   if(running.some(t=>t.id===selectedHeartbeat))$('#heartbeat-task').value=selectedHeartbeat;
-  $('#task-count').textContent=items.length+' 项';
   $('#end-status').textContent=items.some(t=>!['待验收','已完成'].includes(t.status))?'仍有待处理任务，请逐项完成。':'本轮任务均已提交，可以安心结束。';
-  const renderTask = t => {
-    let buttons='';
-    let appendReason='';
-    if(t.notes){try{const notes=JSON.parse(t.notes);appendReason=notes.append_reason||'';}catch{}}
-    const button=(action,label)=>'<button data-id="'+t.id+'" data-action="'+action+'">'+label+'</button>';
-    if(t.owner_inserted&&t.priority!=='高'&&!['已完成','待验收'].includes(t.status))buttons+=button('work_set_high_priority','标为高优先');
-    if(t.status==='阻塞')buttons+=button('work_unblock_task','解除阻塞');
-    if(['今日待办','需修改'].includes(t.status))buttons+=button('work_start_task','开始');
-    if(t.status==='进行中'){buttons+=button(t.is_paused?'work_resume_task':'work_pause_task',t.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
-    if(t.status==='待验收')buttons+=button('work_update_submission','修改待验收内容')+button('work_withdraw_submission','取消待验收并重写');
-    if(['今日待办','进行中','需修改'].includes(t.status))buttons+=button('work_block_task','遇到阻塞');
-    return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(t.attachments,taskApiRoot)+'<div class="buttons">'+buttons+'</div></article>';
-  };
-  const groups = data.groups || [];
-  groupCache = groups;
-  const grouped = groups.map(g=>'<section class="task-group"><div class="group-heading"><span class="badge">'+esc(g.status)+'</span><h3>'+esc(g.title)+'</h3><p>验收通过 '+g.completed_count+' / '+g.total_count+' 项 · '+(g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟')+' · 小任务合计 '+g.estimated_minutes+' 分钟 · 已记录 '+g.actual_minutes+' 分钟</p><p class="hint">小任务可独立估时，之后发现漏拆可随时补充；不要求与大任务参考时间一致。</p><p>'+esc(g.deliverable_expectation)+'</p><details><summary>整体验收标准</summary><p>'+esc(g.acceptance_criteria)+'</p></details><div class="buttons"><button type="button" data-append-group="'+esc(g.id)+'"'+(g.tasks.length>=8?' disabled':'')+'>'+(g.tasks.length>=8?'已达 8 项上限':'补充小任务')+'</button></div></div>'+g.tasks.map(renderTask).join('')+'</section>').join('');
-  const singles = items.filter(t=>!t.group_id).map(renderTask).join('');
-  $('#tasks').innerHTML=grouped+singles || '<div class="empty">还没有任务，先登记今天的工作吧。</div>';
+  groupCache=data.groups||[];
+  renderEmployeeTaskBoard();
   reworks();
 }
 async function run(action,args){
