@@ -100,6 +100,13 @@
 .progress-detail-note.blocker { background: #f7dfd8; color: var(--red); }
 @media(max-width:900px){.progress-people{grid-template-columns:1fr}}
 [hidden] { display: none !important; }
+.data-freeze-banner{margin:0 0 16px;padding:11px 14px;border:1px solid #cfad7a;border-radius:10px;background:#fff4df;color:#704a20;font-size:14px}
+.data-freeze-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,240px) auto;gap:12px;align-items:end;margin:16px 0;padding:16px;border:1px solid #cfad7a;border-radius:12px;background:#fff8ea}
+.data-freeze-form>div p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+.data-freeze-form label{display:grid;gap:6px;font-size:14px}
+.data-freeze-form input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #b9aa99;border-radius:8px;background:#fff}
+.data-freeze-form>p{grid-column:1/-1;min-height:20px;margin:0;color:#704a20;font-size:13px}
+@media(max-width:760px){.data-freeze-form{grid-template-columns:1fr}.data-freeze-form>p{grid-column:auto}}
 .action-group{background:#fbf5ea;border-color:#d9c4a4}.action-group-heading{display:grid;gap:2px}.action-group-heading strong{font-size:17px;margin:4px 0}.action-group-heading>span:last-child{font-size:14px;color:var(--muted)}.action-group-label{font-size:13px;color:#94603e;font-weight:700;letter-spacing:.04em}.action-group-details{margin-top:12px;border-top:1px solid #e5d8c8;padding-top:10px}.action-group-details>summary{cursor:pointer;color:var(--cyan);font-size:14px}.action-group-children{display:grid;gap:8px;margin-top:8px;padding-left:12px;border-left:3px solid #e1cba9}.action-child{margin-top:0;padding:12px;background:#fffdf8}.action-child strong{font-size:15px;margin:6px 0}.action-child .detail-link{margin-top:6px}
 /* 大任务一次验收：只在全部小任务提交后出现，附员工建议总分。 */
 .action-group-review{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid #e0cba4;border-radius:10px;background:#fdf3df;font-size:14px;color:#7a5320}

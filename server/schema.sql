@@ -123,4 +123,11 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports (report_date, assignee);
+
+CREATE TABLE IF NOT EXISTS board_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL
+);
 PRAGMA optimize;

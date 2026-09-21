@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, editingSubmissionId = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null;
+let user = null, items = [], groupCache = [], busy = false, selected = null, editingSubmissionId = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null, dataFreezeDate = null;
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const taskApiRoot = new URL('../', apiBase);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -45,10 +45,12 @@ function todoDates(baseDate){
   const base=new Date(`${baseDate}T12:00:00Z`);
   const day=base.getUTCDay();
   const monday=addDays(base,day===0?-6:1-day);
-  return [0,1,2,3,4,7].map(offset=>{
+  const dates=[0,1,2,3,4,7].map(offset=>{
     const value=addDays(monday,offset);
     return {value:isoDate(value),day:value.getUTCDay()};
   });
+  const freezeBoundary=typeof dataFreezeDate==='string'?dataFreezeDate:null;
+  return freezeBoundary?dates.filter(option=>option.value>=freezeBoundary):dates;
 }
 function todoStorageKey(date){return 'todo:'+user+':'+date;}
 function renderTodoDates(baseDate, migrateLegacy=false){
@@ -57,7 +59,7 @@ function renderTodoDates(baseDate, migrateLegacy=false){
   todoBaseDate=baseDate;
   const options=todoDates(baseDate);
   const available=new Set(options.map(option=>option.value));
-  const fallback=options.find(option=>option.value===baseDate)?.value||options[5].value||options[0].value;
+  const fallback=options.find(option=>option.value===baseDate)?.value||options.at(-1)?.value||baseDate;
   const selected=available.has(todoDate)?todoDate:fallback;
   select.innerHTML=options.map(option=>{
     const date=new Date(`${option.value}T12:00:00Z`);
@@ -151,6 +153,10 @@ $('#personal-summary').addEventListener('click',event=>{
 $('#close-today-score').onclick=()=>$('#today-score-dialog').close();
 async function refresh(){
   const data=await api('me');user=data.name;items=data.tasks;offset=data.server_time-Date.now();
+  dataFreezeDate=data.freeze_date||null;
+  const freezeBanner=$('#employee-freeze-banner');
+  freezeBanner.hidden=!data.freeze_date;
+  freezeBanner.textContent=data.freeze_date?'数据冻结已生效：这里只显示 '+data.freeze_date+'（含）之后的新数据，更早记录视为不存在。':'';
   const firstVisit=draftOwner!==user;
   if(firstVisit){clearHeartbeatImages();$('#heartbeat').reset();draftOwner=user;workPlan=null;planRequestId=null;todoDate=null;todoBaseDate=null;$('#work-text').value=storage('work-source:'+user)||'';previewWork();}
   renderTodoDates(data.date,firstVisit);

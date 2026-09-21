@@ -215,19 +215,26 @@ def apply(db, member, name, args, stamp, event, today):
     raise ValueError('未知工作流操作。')
 
 
-def daily_scores(db, report_date, days=7):
+def daily_scores(db, report_date, days=7, minimum_created_at=0):
     end = datetime.strptime(report_date, '%Y-%m-%d').replace(tzinfo=ZoneInfo('Asia/Shanghai')) + timedelta(days=1)
     result = []
     for offset in range(days, 0, -1):
         start = end - timedelta(days=offset)
         stop = start + timedelta(days=1)
         for member in ('ZHC', 'YWT', 'YWH'):
-            row = db.execute("SELECT COALESCE(SUM(awarded_points),0), COUNT(*), SUM(CASE WHEN awarded_points IS NULL THEN 1 ELSE 0 END) FROM tasks WHERE assignee=? AND status='已完成' AND completed_at>=? AND completed_at<?", (member, int(start.timestamp()*1000), int(stop.timestamp()*1000))).fetchone()
+            row = db.execute(
+                """SELECT COALESCE(SUM(awarded_points),0), COUNT(*),
+                          SUM(CASE WHEN awarded_points IS NULL THEN 1 ELSE 0 END)
+                   FROM tasks
+                   WHERE assignee=? AND status='已完成' AND created_at>=?
+                     AND completed_at>=? AND completed_at<?""",
+                (member, minimum_created_at, int(start.timestamp()*1000), int(stop.timestamp()*1000)),
+            ).fetchone()
             result.append({'date':start.strftime('%Y-%m-%d'),'assignee':member,'points':round(row[0],2),'completed_count':row[1],'unscored_count':row[2] or 0})
     return result
 
 
-def first_submission_scores(db, report_date, days=5):
+def first_submission_scores(db, report_date, days=5, minimum_created_at=0):
     """Return employee self-scores from their first review submission per workday."""
     day = datetime.strptime(report_date, '%Y-%m-%d').date()
     workdays = []
@@ -246,8 +253,9 @@ def first_submission_scores(db, report_date, days=5):
                 """SELECT COALESCE(SUM(first_submitted_points), 0), COUNT(*),
                           SUM(CASE WHEN first_submitted_points IS NULL THEN 1 ELSE 0 END)
                    FROM tasks
-                   WHERE assignee=? AND first_submitted_at>=? AND first_submitted_at<?""",
-                (member, int(start.timestamp()*1000), int(stop.timestamp()*1000)),
+                   WHERE assignee=? AND created_at>=?
+                     AND first_submitted_at>=? AND first_submitted_at<?""",
+                (member, minimum_created_at, int(start.timestamp()*1000), int(stop.timestamp()*1000)),
             ).fetchone()
             result.append({
                 'date': workday.strftime('%Y-%m-%d'),

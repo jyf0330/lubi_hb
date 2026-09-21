@@ -127,6 +127,53 @@ def day_start_ms(offset_days: int = 0) -> int:
     return int(value.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
 
 
+def date_start_ms(value: str) -> int:
+    parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=SHANGHAI)
+    return int(parsed.timestamp() * 1000)
+
+
+def validate_freeze_date(value: object) -> str:
+    freeze_date = str(value or "").strip()
+    try:
+        parsed = datetime.strptime(freeze_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("请选择正确的数据冻结日期。") from exc
+    if parsed.strftime("%Y-%m-%d") != freeze_date:
+        raise ValueError("请选择正确的数据冻结日期。")
+    if freeze_date > today():
+        raise ValueError("数据冻结日期不能晚于今天。")
+    return freeze_date
+
+
+def data_freeze_date(db: sqlite3.Connection) -> str | None:
+    row = db.execute("SELECT value FROM board_settings WHERE key='data_freeze_date'").fetchone()
+    return str(row[0]) if row else None
+
+
+def data_freeze_start_ms(db: sqlite3.Connection) -> int:
+    freeze_date = data_freeze_date(db)
+    return date_start_ms(freeze_date) if freeze_date else 0
+
+
+def save_data_freeze(db: sqlite3.Connection, member: str, value: object, timestamp: int) -> dict[str, object]:
+    if member != "YWH":
+        raise ValueError("只有负责人可以设置数据冻结日期。")
+    freeze_date = validate_freeze_date(value)
+    db.execute(
+        """INSERT INTO board_settings(key, value, updated_at, updated_by)
+           VALUES ('data_freeze_date', ?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+             value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by""",
+        (freeze_date, timestamp, member),
+    )
+    return {
+        "ok": True,
+        "freeze_date": freeze_date,
+        "freeze_start_ms": date_start_ms(freeze_date),
+        "message": f"数据已从 {freeze_date} 起重新开始显示；更早记录仍安全保留在数据库中。",
+    }
+
+
 class ClosingConnection(sqlite3.Connection):
     def __exit__(self, *args):
         try:
@@ -225,16 +272,20 @@ def event(db: sqlite3.Connection, task_id: str, actor: str, event_type: str, fro
 
 
 def task_for(db: sqlite3.Connection, task_id: str, member: str) -> sqlite3.Row | None:
-    return db.execute("SELECT * FROM tasks WHERE id = ? AND assignee = ?", (task_id, member)).fetchone()
+    return db.execute(
+        "SELECT * FROM tasks WHERE id = ? AND assignee = ? AND created_at >= ?",
+        (task_id, member, data_freeze_start_ms(db)),
+    ).fetchone()
 
 
 def active_for(db: sqlite3.Connection, member: str, task_id=None) -> sqlite3.Row | None:
     return db.execute(
         """SELECT t.*, ws.id AS session_id, ws.started_at AS session_started_at
         FROM tasks t JOIN work_sessions ws ON ws.task_id = t.id
-        WHERE t.assignee = ? AND t.status = '进行中' AND t.is_paused = 0 AND ws.ended_at IS NULL AND (? IS NULL OR t.id = ?)
+        WHERE t.assignee = ? AND t.created_at >= ? AND t.status = '进行中'
+          AND t.is_paused = 0 AND ws.ended_at IS NULL AND (? IS NULL OR t.id = ?)
         ORDER BY ws.started_at DESC LIMIT 1""",
-        (member, task_id, task_id),
+        (member, data_freeze_start_ms(db), task_id, task_id),
     ).fetchone()
 
 
@@ -255,7 +306,12 @@ def actual_minutes(db: sqlite3.Connection, task_id: str, timestamp: int) -> int:
 
 def checkin_status(db: sqlite3.Connection, member: str, timestamp: int, task_id=None) -> dict[str, object]:
     if task_id is None:
-        ids = db.execute("SELECT DISTINCT t.id FROM tasks t JOIN work_sessions ws ON ws.task_id=t.id WHERE t.assignee=? AND t.status='进行中' AND t.is_paused=0 AND ws.ended_at IS NULL", (member,)).fetchall()
+        ids = db.execute(
+            """SELECT DISTINCT t.id FROM tasks t JOIN work_sessions ws ON ws.task_id=t.id
+               WHERE t.assignee=? AND t.created_at>=? AND t.status='进行中'
+                 AND t.is_paused=0 AND ws.ended_at IS NULL""",
+            (member, data_freeze_start_ms(db)),
+        ).fetchall()
         statuses = [checkin_status(db, member, timestamp, row['id']) for row in ids]
         return min(statuses, key=lambda value:value['next_due_at']) if statuses else {'active':False,'due':False}
     active = active_for(db, member, task_id)
@@ -285,13 +341,13 @@ def checkin_status(db: sqlite3.Connection, member: str, timestamp: int, task_id=
 
 
 def promote_due_tasks(db: sqlite3.Connection, member: str | None, timestamp: int) -> None:
-    parameters: list[object] = [today()]
+    parameters: list[object] = [today(), data_freeze_start_ms(db)]
     member_clause = ""
     if member:
         member_clause = " AND assignee = ?"
         parameters.append(member)
     due = db.execute(
-        f"SELECT id, assignee FROM tasks WHERE status = '任务池' AND planned_date <= ?{member_clause}",
+        f"SELECT id, assignee FROM tasks WHERE status = '任务池' AND planned_date <= ? AND created_at >= ?{member_clause}",
         parameters,
     ).fetchall()
     for task in due:
@@ -300,22 +356,23 @@ def promote_due_tasks(db: sqlite3.Connection, member: str | None, timestamp: int
 
 
 def day_snapshot(db: sqlite3.Connection, member: str, report_date: str, timestamp: int) -> dict[str, object]:
+    freeze_start = data_freeze_start_ms(db)
     tasks = [dict(row) for row in db.execute(
-        "SELECT * FROM tasks WHERE assignee = ? AND planned_date = ? ORDER BY created_at",
-        (member, report_date),
+        "SELECT * FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ? ORDER BY created_at",
+        (member, report_date, freeze_start),
     ).fetchall()]
     for task in tasks:
         task["actual_minutes"] = actual_minutes(db, task["id"], timestamp)
         assessed_at = task.get("submitted_at") or task.get("completed_at") or timestamp
         task.update(time_assessment(task["estimated_minutes"], task["actual_minutes"], task.get("deadline_at"), assessed_at))
     planned = round(sum(float(task["planned_points"]) for task in tasks), 1)
-    completed = next(r["points"] for r in workflow.daily_scores(db, report_date, 1) if r["assignee"] == member)
+    completed = next(r["points"] for r in workflow.daily_scores(db, report_date, 1, freeze_start) if r["assignee"] == member)
     progress_updates = [dict(row) for row in db.execute(
         """SELECT p.task_id, t.title, p.summary, p.next_step, p.blocker, p.progress_percent, p.created_at
         FROM progress_updates p JOIN tasks t ON t.id = p.task_id
-        WHERE p.assignee = ? AND p.created_at >= ? AND p.created_at < ?
+        WHERE p.assignee = ? AND t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
         ORDER BY p.created_at""",
-        (member, day_start_ms(), day_start_ms(1)),
+        (member, freeze_start, max(day_start_ms(), freeze_start), day_start_ms(1)),
     ).fetchall()]
     return {
         "member": member,
@@ -383,6 +440,17 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     timestamp = now_ms()
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
+        freeze_start = data_freeze_start_ms(db)
+        task_id_arg = str(args.get("task_id") or "")
+        if task_id_arg:
+            frozen_task = db.execute("SELECT created_at FROM tasks WHERE id=?", (task_id_arg,)).fetchone()
+            if frozen_task and int(frozen_task["created_at"]) < freeze_start:
+                raise ValueError("该任务早于数据冻结日期，当前视为不存在。")
+        group_id_arg = str(args.get("group_id") or "")
+        if group_id_arg:
+            frozen_group = db.execute("SELECT created_at FROM task_groups WHERE id=?", (group_id_arg,)).fetchone()
+            if frozen_group and int(frozen_group["created_at"]) < freeze_start:
+                raise ValueError("该大任务早于数据冻结日期，当前视为不存在。")
         if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'owner_set_task_score', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
@@ -393,7 +461,10 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
                 )
             return tool_result(result.pop('message'), **result)
         if name == "work_get_active":
-            active_tasks = [dict(r) for r in db.execute("SELECT * FROM tasks WHERE assignee=? AND status='进行中' ORDER BY updated_at DESC", (member,))]
+            active_tasks = [dict(r) for r in db.execute(
+                "SELECT * FROM tasks WHERE assignee=? AND created_at>=? AND status='进行中' ORDER BY updated_at DESC",
+                (member, freeze_start),
+            )]
             task = active_tasks[0] if active_tasks else None
             if not task:
                 return tool_result("当前没有进行中的任务。", task=None, tasks=[])
@@ -405,7 +476,11 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             return tool_result(f"当前任务：{task['title']}{'（已暂停）' if task['is_paused'] else '（计时中）'}", task=value, tasks=active_tasks)
 
         if name in ("work_report_heartbeat", "work_checkin_progress"):
-            if not args.get('task_id') and db.execute("SELECT COUNT(*) FROM work_sessions WHERE assignee=? AND ended_at IS NULL", (member,)).fetchone()[0] > 1:
+            if not args.get('task_id') and db.execute(
+                """SELECT COUNT(*) FROM work_sessions ws JOIN tasks t ON t.id=ws.task_id
+                   WHERE ws.assignee=? AND t.created_at>=? AND ws.ended_at IS NULL""",
+                (member, freeze_start),
+            ).fetchone()[0] > 1:
                 raise ValueError('有多个并行任务，请指定 task_id。')
             active = active_for(db, member, args.get('task_id'))
             if not active:
@@ -488,10 +563,16 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
         if name == "work_get_day_summary":
             snapshot = day_snapshot(db, member, today(), timestamp)
             tomorrow_tasks = [dict(row) for row in db.execute(
-                "SELECT id, title, type, status, estimated_minutes, planned_points, deliverable_expectation, acceptance_criteria, notes FROM tasks WHERE assignee = ? AND planned_date = ? ORDER BY created_at",
-                (member, date_string(1)),
+                """SELECT id, title, type, status, estimated_minutes, planned_points,
+                          deliverable_expectation, acceptance_criteria, notes
+                   FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ?
+                   ORDER BY created_at""",
+                (member, date_string(1), freeze_start),
             ).fetchall()]
-            report = db.execute("SELECT summary, submitted_at FROM daily_reports WHERE assignee = ? AND report_date = ?", (member, today())).fetchone()
+            report = db.execute(
+                "SELECT summary, submitted_at FROM daily_reports WHERE assignee = ? AND report_date = ? AND submitted_at >= ?",
+                (member, today(), freeze_start),
+            ).fetchone()
             return tool_result(
                 f"已读取 {member} 今日记录：计划 {snapshot['planned_points']} 点，完成 {snapshot['completed_points']} 点。",
                 snapshot=snapshot,
@@ -501,7 +582,10 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             )
 
         if name == "work_submit_daily_report":
-            if db.execute("SELECT 1 FROM daily_reports WHERE assignee = ? AND report_date = ?", (member, today())).fetchone():
+            if db.execute(
+                "SELECT 1 FROM daily_reports WHERE assignee = ? AND report_date = ? AND submitted_at >= ?",
+                (member, today(), freeze_start),
+            ).fetchone():
                 raise ValueError("今日日报已经提交，避免重复创建明日任务。")
             summary = str(args.get("summary", "")).strip()[:2000]
             items = args.get("tomorrow_tasks")
@@ -548,7 +632,11 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             return tool_result(f"已开始：{task['title']}", task_id=task_id, status="进行中", started_at=timestamp)
 
         if name == "work_pause_task":
-            if not args.get('task_id') and db.execute("SELECT COUNT(*) FROM work_sessions WHERE assignee=? AND ended_at IS NULL", (member,)).fetchone()[0] > 1:
+            if not args.get('task_id') and db.execute(
+                """SELECT COUNT(*) FROM work_sessions ws JOIN tasks t ON t.id=ws.task_id
+                   WHERE ws.assignee=? AND t.created_at>=? AND ws.ended_at IS NULL""",
+                (member, freeze_start),
+            ).fetchone()[0] > 1:
                 raise ValueError('有多个并行任务，请指定 task_id。')
             active = active_for(db, member, args.get('task_id'))
             if not active:
@@ -748,8 +836,8 @@ def append_task_group(member, data):
     with DB_LOCK, connect() as db:
         db.execute("BEGIN IMMEDIATE")
         group = db.execute(
-            "SELECT * FROM task_groups WHERE id = ? AND assignee = ?",
-            (group_id, member),
+            "SELECT * FROM task_groups WHERE id = ? AND assignee = ? AND created_at >= ?",
+            (group_id, member, data_freeze_start_ms(db)),
         ).fetchone()
         if not group:
             raise ValueError("找不到属于当前成员的大任务。")
@@ -900,11 +988,22 @@ def append_task_group(member, data):
 
 
 def task_groups(db, member=None):
-    rows = db.execute("SELECT id, assignee, title, deliverable_expectation, acceptance_criteria, stated_minutes, created_at FROM task_groups" + (" WHERE assignee = ?" if member else "") + " ORDER BY created_at DESC", (member,) if member else ()).fetchall()
+    freeze_start = data_freeze_start_ms(db)
+    query = """SELECT id, assignee, title, deliverable_expectation,
+                      acceptance_criteria, stated_minutes, created_at
+               FROM task_groups WHERE created_at >= ?"""
+    parameters: tuple[object, ...] = (freeze_start,)
+    if member:
+        query += " AND assignee = ?"
+        parameters += (member,)
+    rows = db.execute(query + " ORDER BY created_at DESC", parameters).fetchall()
     result = []
     for row in rows:
         group = dict(row)
-        children = [dict(t) for t in db.execute("SELECT * FROM tasks WHERE group_id = ? ORDER BY group_order", (row["id"],))]
+        children = [dict(t) for t in db.execute(
+            "SELECT * FROM tasks WHERE group_id = ? AND created_at >= ? ORDER BY group_order",
+            (row["id"], freeze_start),
+        )]
         task_files.attach_metadata(db, children)
         timestamp = now_ms()
         for child in children:
@@ -979,41 +1078,54 @@ def dashboard_data() -> dict[str, object]:
     with DB_LOCK, connect() as db:
         timestamp = now_ms()
         promote_due_tasks(db, None, timestamp)
+        freeze_date = data_freeze_date(db)
+        freeze_start = data_freeze_start_ms(db)
         tasks = [dict(row) for row in db.execute(
             """SELECT * FROM tasks
-            WHERE planned_date = ? OR status != '已完成' OR (completed_at >= ? AND completed_at < ?)
+            WHERE created_at >= ?
+              AND (planned_date = ? OR status != '已完成' OR (completed_at >= ? AND completed_at < ?))
             ORDER BY updated_at DESC""",
-            (today(), day_start_ms(-6), day_start_ms(1)),
+            (freeze_start, today(), max(day_start_ms(-6), freeze_start), day_start_ms(1)),
         ).fetchall()]
-        all_tasks = [dict(row) for row in db.execute("SELECT * FROM tasks ORDER BY updated_at DESC").fetchall()]
+        all_tasks = [dict(row) for row in db.execute(
+            "SELECT * FROM tasks WHERE created_at >= ? ORDER BY updated_at DESC",
+            (freeze_start,),
+        ).fetchall()]
         enrich_dashboard_tasks(db, tasks, timestamp)
         enrich_dashboard_tasks(db, all_tasks, timestamp)
-        sessions = [dict(row) for row in db.execute("SELECT ws.*, t.title, t.type FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id WHERE ws.started_at < ? AND (ws.ended_at IS NULL OR ws.ended_at > ?) ORDER BY ws.started_at DESC LIMIT 24", (day_start_ms(1), day_start_ms())).fetchall()]
+        sessions = [dict(row) for row in db.execute(
+            """SELECT ws.*, t.title, t.type FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id
+               WHERE t.created_at >= ? AND ws.started_at < ?
+                 AND (ws.ended_at IS NULL OR ws.ended_at > ?)
+               ORDER BY ws.started_at DESC LIMIT 24""",
+            (freeze_start, day_start_ms(1), max(day_start_ms(), freeze_start)),
+        ).fetchall()]
         for session in sessions:
             end_ms = min(int(session["ended_at"]), timestamp) if session["ended_at"] is not None else timestamp
             session["recorded_minutes"] = working_minutes_between(int(session["started_at"]), end_ms)
         progress_updates = [dict(row) for row in db.execute(
             """SELECT p.*, t.title, t.type FROM progress_updates p
             JOIN tasks t ON t.id = p.task_id
-            WHERE p.created_at >= ? AND p.created_at < ?
+            WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
             ORDER BY p.created_at DESC LIMIT 60""",
-            (day_start_ms(), day_start_ms(1)),
+            (freeze_start, max(day_start_ms(), freeze_start), day_start_ms(1)),
         ).fetchall()]
-        timeline_start = day_start_ms(-6)
+        timeline_start = max(day_start_ms(-6), freeze_start)
         timeline_events = [dict(row) for row in db.execute(
             """SELECT e.id, e.task_id, e.actor, e.event_type, e.from_status,
                       e.to_status, e.detail, e.created_at, t.title, t.assignee, t.type
                FROM task_events e JOIN tasks t ON t.id = e.task_id
-               WHERE e.created_at >= ? AND e.created_at < ?
+               WHERE t.created_at >= ? AND e.created_at >= ? AND e.created_at < ?
                ORDER BY e.created_at DESC LIMIT 500""",
-            (timeline_start, day_start_ms(1)),
+            (freeze_start, timeline_start, day_start_ms(1)),
         ).fetchall()]
         timeline_sessions = [dict(row) for row in db.execute(
             """SELECT ws.*, t.title, t.type, t.status
                FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id
-               WHERE ws.started_at < ? AND (ws.ended_at IS NULL OR ws.ended_at > ?)
+               WHERE t.created_at >= ? AND ws.started_at < ?
+                 AND (ws.ended_at IS NULL OR ws.ended_at > ?)
                ORDER BY ws.started_at DESC LIMIT 500""",
-            (day_start_ms(1), timeline_start),
+            (freeze_start, day_start_ms(1), timeline_start),
         ).fetchall()]
         for session in timeline_sessions:
             clipped_start = max(int(session["started_at"]), timeline_start)
@@ -1022,20 +1134,31 @@ def dashboard_data() -> dict[str, object]:
         timeline_progress = [dict(row) for row in db.execute(
             """SELECT p.*, t.title, t.type FROM progress_updates p
                JOIN tasks t ON t.id = p.task_id
-               WHERE p.created_at >= ? AND p.created_at < ?
+               WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
                ORDER BY p.created_at DESC LIMIT 300""",
-            (timeline_start, day_start_ms(1)),
+            (freeze_start, timeline_start, day_start_ms(1)),
         ).fetchall()]
-        scores = workflow.daily_scores(db, today())
-        first_submission_scores = workflow.first_submission_scores(db, today())
+        scores = workflow.daily_scores(db, today(), minimum_created_at=freeze_start)
+        first_submission_scores = workflow.first_submission_scores(db, today(), minimum_created_at=freeze_start)
+        if freeze_date:
+            scores = [row for row in scores if row["date"] >= freeze_date]
+            first_submission_scores = [row for row in first_submission_scores if row["date"] >= freeze_date]
         report_images.attach_metadata(db, progress_updates)
         report_files.attach_metadata(db, progress_updates)
         report_images.attach_metadata(db, timeline_progress)
         report_files.attach_metadata(db, timeline_progress)
         groups = task_groups(db)
-        reports = [dict(row) for row in db.execute("SELECT assignee, summary, submitted_at FROM daily_reports WHERE report_date = ? ORDER BY assignee", (today(),)).fetchall()]
-        tomorrow_tasks = [dict(row) for row in db.execute("SELECT id, assignee, title, type, status, estimated_minutes, planned_points FROM tasks WHERE planned_date = ? ORDER BY assignee, created_at", (date_string(1),)).fetchall()]
-    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+        reports = [dict(row) for row in db.execute(
+            """SELECT assignee, summary, submitted_at FROM daily_reports
+               WHERE report_date = ? AND submitted_at >= ? ORDER BY assignee""",
+            (today(), freeze_start),
+        ).fetchall()]
+        tomorrow_tasks = [dict(row) for row in db.execute(
+            """SELECT id, assignee, title, type, status, estimated_minutes, planned_points
+               FROM tasks WHERE planned_date = ? AND created_at >= ? ORDER BY assignee, created_at""",
+            (date_string(1), freeze_start),
+        ).fetchall()]
+    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 def analysis_context(period: str) -> dict[str, object]:
@@ -1044,22 +1167,27 @@ def analysis_context(period: str) -> dict[str, object]:
         raise ValueError("分析范围只能选择今日或近 7 天。")
     days = 1 if period == "today" else 7
     start_offset = 0 if period == "today" else -6
-    start_ms = day_start_ms(start_offset)
+    requested_start_ms = day_start_ms(start_offset)
     end_ms = day_start_ms(1)
-    start_date = date_string(start_offset)
+    requested_start_date = date_string(start_offset)
     end_date = today()
     timestamp = now_ms()
     member_names = {code: name for name, code in EMPLOYEE_NAMES.items()}
 
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, None, timestamp)
+        freeze_date = data_freeze_date(db)
+        freeze_start = data_freeze_start_ms(db)
+        start_ms = max(requested_start_ms, freeze_start)
+        start_date = max(requested_start_date, freeze_date) if freeze_date else requested_start_date
         all_rows = db.execute(
             """SELECT * FROM tasks
-               WHERE status NOT IN ('已完成', '已关闭')
-                  OR (completed_at >= ? AND completed_at < ?)
-                  OR (planned_date >= ? AND planned_date <= ?)
+               WHERE created_at >= ? AND (
+                    status NOT IN ('已完成', '已关闭')
+                    OR (completed_at >= ? AND completed_at < ?)
+                    OR (planned_date >= ? AND planned_date <= ?))
                ORDER BY updated_at DESC""",
-            (start_ms, end_ms, start_date, end_date),
+            (freeze_start, start_ms, end_ms, start_date, end_date),
         ).fetchall()
         tasks = []
         for row in all_rows[:120]:
@@ -1098,9 +1226,9 @@ def analysis_context(period: str) -> dict[str, object]:
             for row in db.execute(
                 """SELECT p.*, t.title FROM progress_updates p
                    JOIN tasks t ON t.id = p.task_id
-                   WHERE p.created_at >= ? AND p.created_at < ?
+                   WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
                    ORDER BY p.created_at DESC LIMIT 120""",
-                (start_ms, end_ms),
+                (freeze_start, start_ms, end_ms),
             ).fetchall()
         ]
         reports = [
@@ -1112,20 +1240,25 @@ def analysis_context(period: str) -> dict[str, object]:
             for row in db.execute(
                 """SELECT assignee, report_date, summary FROM daily_reports
                    WHERE report_date >= ? AND report_date <= ?
+                     AND submitted_at >= ?
                    ORDER BY report_date DESC, assignee""",
-                (start_date, end_date),
+                (start_date, end_date, freeze_start),
             ).fetchall()
         ]
         period_minutes = {member: 0 for member in MEMBERS}
         for row in db.execute(
-            """SELECT assignee, started_at, ended_at FROM work_sessions
-               WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)""",
-            (end_ms, start_ms),
+            """SELECT ws.assignee, ws.started_at, ws.ended_at FROM work_sessions ws
+               JOIN tasks t ON t.id=ws.task_id
+               WHERE t.created_at >= ? AND ws.started_at < ?
+                 AND (ws.ended_at IS NULL OR ws.ended_at > ?)""",
+            (freeze_start, end_ms, start_ms),
         ).fetchall():
             clipped_start = max(int(row["started_at"]), start_ms)
             clipped_end = min(int(row["ended_at"] or timestamp), end_ms)
             period_minutes[row["assignee"]] += working_minutes_between(clipped_start, clipped_end)
-        scores = workflow.daily_scores(db, today(), days)
+        scores = workflow.daily_scores(db, today(), days, freeze_start)
+        if freeze_date:
+            scores = [row for row in scores if row["date"] >= freeze_date]
 
     status_order = ("今日待办", "进行中", "已暂停", "待验收", "需修改", "阻塞", "已完成", "已关闭")
     people = []
@@ -1154,6 +1287,7 @@ def analysis_context(period: str) -> dict[str, object]:
             "范围内有效工时按工作时段内的计时会话裁剪统计。",
             "任务累计实际分钟是该任务全部历史计时，不等同于范围内工时。",
             "当前未完成任务会纳入，以便识别风险；已完成任务只纳入所选范围。",
+            f"数据冻结边界：{freeze_date}（含）之后；更早记录不参与分析。" if freeze_date else "当前未设置数据冻结边界。",
         ],
         "人员汇总": people,
         "任务明细": tasks,
@@ -1209,6 +1343,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._employee_cookie = "team_employee=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
                 self.send_json(200, {"ok": True})
                 return
+            if path == "/api/employee/freeze":
+                with DB_LOCK, connect() as db:
+                    result = save_data_freeze(db, member, data.get("freeze_date"), now_ms())
+                self.send_json(200, result)
+                return
             if path == "/api/employee/heartbeat":
                 result = call_tool(member, "work_report_heartbeat", data)
                 self.send_json(200, {"ok": True, "message": result["content"][0]["text"]})
@@ -1234,7 +1373,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('只有负责人可以请求平台 AI 评分。')
                 task_id = str(data.get('task_id', ''))
                 with DB_LOCK, connect() as db:
-                    row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+                    row = db.execute(
+                        'SELECT * FROM tasks WHERE id=? AND created_at>=?',
+                        (task_id, data_freeze_start_ms(db)),
+                    ).fetchone()
                     if not row or row['status'] != '待验收':
                         raise ValueError('请选择待验收任务。')
                     source = {k:row[k] for k in ('title','type','deliverable_expectation','acceptance_criteria','result_summary')}
@@ -1301,29 +1443,50 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with DB_LOCK, connect() as db:
                 promote_due_tasks(db, member, now_ms())
-                tasks = [dict(row) for row in db.execute("SELECT * FROM tasks WHERE assignee = ? AND status NOT IN ('已完成', '已关闭') ORDER BY CASE WHEN priority='高' THEN 0 ELSE 1 END, created_at DESC", (member,))]
+                freeze_date = data_freeze_date(db)
+                freeze_start = data_freeze_start_ms(db)
+                tasks = [dict(row) for row in db.execute(
+                    """SELECT * FROM tasks WHERE assignee = ? AND created_at >= ?
+                       AND status NOT IN ('已完成', '已关闭')
+                       ORDER BY CASE WHEN priority='高' THEN 0 ELSE 1 END, created_at DESC""",
+                    (member, freeze_start),
+                )]
                 for task in tasks:
                     task["actual_minutes"] = actual_minutes(db, task["id"], now_ms())
                 groups = task_groups(db, member)
                 for group in groups:
                     group["tasks"] = [task for task in group["tasks"] if task["status"] != "已关闭"]
-                scores = [row for row in workflow.daily_scores(db, today()) if row['assignee'] == member]
+                scores = [row for row in workflow.daily_scores(db, today(), minimum_created_at=freeze_start) if row['assignee'] == member]
+                if freeze_date:
+                    scores = [row for row in scores if row["date"] >= freeze_date]
                 today_score_details = [dict(row) for row in db.execute(
                     """SELECT t.id, t.title, t.group_id, g.title AS group_title,
                               t.awarded_points, t.completed_at
                        FROM tasks t LEFT JOIN task_groups g ON g.id = t.group_id
                        WHERE t.assignee = ? AND t.status = '已完成'
+                         AND t.created_at >= ?
                          AND t.completed_at >= ? AND t.completed_at < ?
                        ORDER BY COALESCE(g.created_at, t.created_at), t.group_order, t.created_at""",
-                    (member, day_start_ms(), day_start_ms(1)),
+                    (member, freeze_start, max(day_start_ms(), freeze_start), day_start_ms(1)),
                 )]
-                completed = [dict(row) for row in db.execute("SELECT id,title,status,awarded_points,acceptance_result,result_summary,completed_at FROM tasks WHERE assignee=? AND status='已完成' ORDER BY completed_at DESC LIMIT 30", (member,))]
-                progress = [dict(row) for row in db.execute("SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at FROM progress_updates p JOIN tasks t ON t.id=p.task_id WHERE p.assignee=? AND t.assignee=? ORDER BY p.created_at DESC LIMIT 20", (member, member))]
+                completed = [dict(row) for row in db.execute(
+                    """SELECT id,title,status,awarded_points,acceptance_result,result_summary,completed_at
+                       FROM tasks WHERE assignee=? AND created_at>=? AND status='已完成'
+                       ORDER BY completed_at DESC LIMIT 30""",
+                    (member, freeze_start),
+                )]
+                progress = [dict(row) for row in db.execute(
+                    """SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at
+                       FROM progress_updates p JOIN tasks t ON t.id=p.task_id
+                       WHERE p.assignee=? AND t.assignee=? AND t.created_at>=? AND p.created_at>=?
+                       ORDER BY p.created_at DESC LIMIT 20""",
+                    (member, member, freeze_start, freeze_start),
+                )]
                 report_images.attach_metadata(db, progress)
                 report_files.attach_metadata(db, progress)
                 task_files.attach_metadata(db, tasks)
                 task_files.attach_metadata(db, completed)
-            self.send_json(200, {"groups": groups, "name": next(n for n, m in EMPLOYEE_NAMES.items() if m == member), "member": member, "role": member_role(member), "is_admin": member == "YWH", "date": today(), "scores": scores, "today_score_details": today_score_details, "completed": completed, "progress": progress, "tasks": tasks, "server_time": now_ms()})
+            self.send_json(200, {"groups": groups, "name": next(n for n, m in EMPLOYEE_NAMES.items() if m == member), "member": member, "role": member_role(member), "is_admin": member == "YWH", "date": today(), "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "scores": scores, "today_score_details": today_score_details, "completed": completed, "progress": progress, "tasks": tasks, "server_time": now_ms()})
         elif path.startswith("/api/task-files/"):
             member = self.employee_member()
             if not member:
@@ -1331,8 +1494,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with connect() as db:
                 row = db.execute(
-                    "SELECT a.body,a.content_type,a.name FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=? AND (t.assignee=? OR ?='YWH')",
-                    (path.rsplit("/", 1)[-1], member, member),
+                    """SELECT a.body,a.content_type,a.name FROM task_attachments a
+                       JOIN tasks t ON t.id=a.task_id
+                       WHERE a.id=? AND t.created_at>=? AND (t.assignee=? OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), member, member),
                 ).fetchone()
             if row:
                 safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
@@ -1348,8 +1513,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "请先登录员工页面查看图片。"})
                 return
             with connect() as db:
-                row = db.execute("SELECT i.body,i.content_type,i.name FROM progress_images i JOIN progress_updates p ON p.id=i.progress_id WHERE i.id=? AND (p.assignee=? OR ?='YWH')",
-                                 (path.rsplit("/", 1)[-1], member, member)).fetchone()
+                row = db.execute(
+                    """SELECT i.body,i.content_type,i.name FROM progress_images i
+                       JOIN progress_updates p ON p.id=i.progress_id JOIN tasks t ON t.id=p.task_id
+                       WHERE i.id=? AND t.created_at>=? AND p.created_at>=?
+                         AND (p.assignee=? OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member),
+                ).fetchone()
             if row:
                 extra_headers = None
                 if download:
@@ -1364,8 +1534,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "请先登录员工页面下载附件。"})
                 return
             with connect() as db:
-                row = db.execute("SELECT a.body,a.content_type,a.name FROM progress_attachments a JOIN progress_updates p ON p.id=a.progress_id WHERE a.id=? AND (p.assignee=? OR ?='YWH')",
-                                 (path.rsplit("/", 1)[-1], member, member)).fetchone()
+                row = db.execute(
+                    """SELECT a.body,a.content_type,a.name FROM progress_attachments a
+                       JOIN progress_updates p ON p.id=a.progress_id JOIN tasks t ON t.id=p.task_id
+                       WHERE a.id=? AND t.created_at>=? AND p.created_at>=?
+                         AND (p.assignee=? OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member),
+                ).fetchone()
             if row:
                 safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
                 self.send_bytes(200, row["body"], row["content_type"], {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"})
@@ -1401,7 +1576,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path in ("/api/employee/login", "/api/employee/logout", "/api/employee/action", "/api/employee/plan", "/api/employee/create-plan", "/api/employee/append-plan", "/api/employee/score", "/api/employee/analysis-chat", "/api/employee/heartbeat"):
+        if urlparse(self.path).path in ("/api/employee/login", "/api/employee/logout", "/api/employee/freeze", "/api/employee/action", "/api/employee/plan", "/api/employee/create-plan", "/api/employee/append-plan", "/api/employee/score", "/api/employee/analysis-chat", "/api/employee/heartbeat"):
             self.employee_post(urlparse(self.path).path)
             return
         if urlparse(self.path).path != "/api/work-mcp":

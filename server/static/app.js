@@ -7,6 +7,7 @@ let dashboardTimelineSessions = [];
 let dashboardTimelineProgress = [];
 let dashboardServerTime = 0;
 let dashboardDate = "";
+let dashboardFreezeDate = "";
 let dashboardApiRoot = null;
 let ownerLoggedIn = false;
 const statuses = ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞", "已关闭"];
@@ -436,15 +437,25 @@ async function refresh() {
   dashboardScores = data.scores || [];
   dashboardFirstSubmissionScores = data.first_submission_scores || [];
   dashboardDate = data.date;
+  dashboardFreezeDate = data.freeze_date || "";
   dashboardServerTime = Number(data.server_time || Date.now());
   dashboardTimelineEvents = data.timeline_events || [];
   dashboardTimelineSessions = data.timeline_sessions || data.sessions || [];
   dashboardTimelineProgress = data.timeline_progress || data.progress_updates || [];
-  if (!document.querySelector("#timeline-date").value) {
-    document.querySelector("#timeline-date").value = dashboardDate;
-    document.querySelector("#timeline-date").max = dashboardDate;
-    document.querySelector("#timeline-date").min = shanghaiDate(Date.parse(`${dashboardDate}T00:00:00+08:00`) - 6 * 86400000);
-  }
+  const timelineDate = document.querySelector("#timeline-date");
+  const sevenDayMin = shanghaiDate(Date.parse(`${dashboardDate}T00:00:00+08:00`) - 6 * 86400000);
+  const timelineMin = dashboardFreezeDate && dashboardFreezeDate > sevenDayMin ? dashboardFreezeDate : sevenDayMin;
+  timelineDate.max = dashboardDate;
+  timelineDate.min = timelineMin;
+  if (!timelineDate.value || timelineDate.value < timelineMin) timelineDate.value = dashboardDate;
+  const freezeBanner = document.querySelector("#data-freeze-banner");
+  freezeBanner.hidden = !dashboardFreezeDate;
+  freezeBanner.textContent = dashboardFreezeDate
+    ? `数据冻结已生效：工作台只显示 ${dashboardFreezeDate}（含）之后的新数据，更早记录在这里视为不存在。`
+    : "";
+  const freezeInput = document.querySelector("#data-freeze-date");
+  freezeInput.max = dashboardDate;
+  freezeInput.value = dashboardFreezeDate || dashboardDate;
   const tasks = data.tasks.map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
   detectReworks(tasks);
   const sessions = data.sessions;
@@ -838,6 +849,7 @@ async function askAi(question,period=aiPeriod){
 function updateOwnerControls(){
   document.querySelector('#owner-login').hidden=ownerLoggedIn;
   document.querySelector('#insert-task').hidden=!ownerLoggedIn;
+  document.querySelector('#data-freeze-form').hidden=!ownerLoggedIn;
   document.querySelector('#owner-identity').textContent=ownerLoggedIn?'管理员：余文浩（已登录）':'余文浩登录后自动启用管理员权限。';
   document.querySelector('#ai-auth-gate').hidden=ownerLoggedIn;
   document.querySelector('#ai-access-note').textContent=ownerLoggedIn?'已登录；AI 每次都会读取所选范围的最新记录。':'登录负责人身份后可开始分析。';
@@ -919,7 +931,7 @@ function readReviewFile(file){return new Promise((resolve,reject)=>{const reader
 function renderReviewFiles(){const target=document.querySelector('#review-file-previews');if(!target)return;target.innerHTML=reviewFiles.map((item,index)=>'<div class="archive-preview"><span aria-hidden="true">▣</span><strong>'+esc(item.file.name||'附件')+'</strong><small>'+formatReviewFileSize(item.file.size)+'</small><button type="button" data-remove-review-file="'+index+'">移除</button></div>').join('');}
 function formatReviewFileSize(size){return size<1024*1024?Math.max(1,Math.round(size/1024))+' KB':(size/1024/1024).toFixed(1)+' MB';}
 function addReviewFiles(files){const status=document.querySelector('#review-file-status');if(reviewFiles.length+files.length>6){status.textContent='每次最多上传 6 个文件。';return;}if(files.some(file=>!file.size||file.size>20*1024*1024)){status.textContent='文件不能为空，且单个不能超过 20 MB。';return;}if([...reviewFiles.map(item=>item.file),...files].reduce((sum,file)=>sum+file.size,0)>40*1024*1024){status.textContent='文件合计不能超过 40 MB。';return;}reviewFiles.push(...files.map(file=>({file})));renderReviewFiles();status.textContent='已选 '+reviewFiles.length+' / 6 个文件';}
-document.querySelector('#owner-login').onsubmit=async e=>{e.preventDefault();const note=document.querySelector('#owner-notice');try{const data=Object.fromEntries(new FormData(e.target));if(data.name.trim()!==names.YWH)throw Error('此处仅供管理员余文浩登录，员工请使用员工工作台。');await enableOwnerSession();note.textContent='已登录，可以插单、审核打分和关闭阻塞/需修改任务。';}catch(error){note.textContent=error.message;}};
+document.querySelector('#owner-login').onsubmit=async e=>{e.preventDefault();const note=document.querySelector('#owner-notice');try{const data=Object.fromEntries(new FormData(e.target));if(data.name.trim()!==names.YWH)throw Error('此处仅供管理员余文浩登录，员工请使用员工工作台。');await enableOwnerSession();note.textContent='已登录，可以冻结历史数据、插单、审核打分和关闭阻塞/需修改任务。';}catch(error){note.textContent=error.message;}};
 document.querySelector('#ai-owner-login').onclick=async event=>{
   const button=event.currentTarget,status=document.querySelector('#ai-chat-status');
   button.disabled=true;status.textContent='正在启用负责人会话…';
@@ -945,6 +957,20 @@ document.querySelector('#ai-chat-input').onkeydown=event=>{
 };
 document.querySelector('#ai-new-chat').onclick=resetAiChat;
 document.querySelector('#insert-task').onsubmit=async e=>{e.preventDefault();const form=e.target,button=form.querySelector('button'),note=document.querySelector('#owner-notice');button.disabled=true;try{const args=Object.fromEntries(new FormData(form));args.estimated_minutes=Number(args.estimated_minutes);const result=await ownerApi('action',{action:'owner_insert_task',args});note.textContent=result.message;form.reset();await loadDashboard();}catch(error){note.textContent=error.message;}finally{button.disabled=false;}};
+document.querySelector('#data-freeze-form').onsubmit=async event=>{
+  event.preventDefault();
+  const form=event.currentTarget,button=form.querySelector('button'),notice=document.querySelector('#data-freeze-notice');
+  const freezeDate=form.elements.freeze_date.value;
+  if(!freezeDate)return;
+  if(!confirm(`确认把数据起始日设为 ${freezeDate}？更早的任务、计时、HB、日报、附件和得分将从所有工作台及 AI 分析中隐藏。`))return;
+  button.disabled=true;notice.textContent='正在保存冻结日期…';
+  try{
+    const result=await ownerApi('freeze',{freeze_date:freezeDate});
+    await loadDashboard();
+    notice.textContent=result.message;
+  }catch(error){notice.textContent=error.message;}
+  finally{button.disabled=false;}
+};
 let loading=false;
 async function loadDashboard(){
   if(loading)return;loading=true;const button=document.querySelector('#refresh-dashboard');button.disabled=true;
