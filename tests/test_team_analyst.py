@@ -86,6 +86,9 @@ class TeamAnalystTests(unittest.TestCase):
 
         self.assertEqual(answer, "今日有一项待处理风险。")
         self.assertEqual(captured["timeout"], 45)
+        self.assertEqual(captured["body"]["model"], "deepseek-flash")
+        self.assertEqual(captured["body"]["thinking"], {"type": "enabled"})
+        self.assertEqual(captured["body"]["reasoning_effort"], "max")
         self.assertIn("只读看板快照", captured["body"]["messages"][1]["content"])
         self.assertEqual(captured["body"]["messages"][-1]["content"], "分析今天")
         self.assertNotIn("test-key", json.dumps(captured["body"], ensure_ascii=False))

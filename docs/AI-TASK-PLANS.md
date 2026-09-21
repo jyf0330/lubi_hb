@@ -19,7 +19,7 @@ AI 无法获知的数量、尺寸、验收细节显示待补充。预览里的�
 
 - `DEEPSEEK_API_KEY`：服务进程环境变量，必需。不要写入前端、仓库、日志或聊天。
 - `DEEPSEEK_MODEL`：可选，默认 `deepseek-flash`，可设为账户可用的模型名。
-- 官方固定端点 `https://api.deepseek.com/chat/completions`，JSON Output，非流式，关闭思考，45 秒网络超时；不自动重试付费请求。
+- 官方固定端点 `https://api.deepseek.com/chat/completions`，使用当前 `deepseek-flash`（DeepSeek-V4.1-Flash）、JSON Output、非流式，并启用 `reasoning_effort=max` 思考，45 秒网络超时；不自动重试付费请求。
 - 每员工同一时间只允许一次整理，两次请求至少间隔10秒；该限制随进程重启重置。沿用现有姓名登录，并未增加强身份认证。
 - 未配置时，页面明确提示 DeepSeek AI 尚未配置，手动登记仍可用。浏览器不接收密钥或上游错误正文。
 

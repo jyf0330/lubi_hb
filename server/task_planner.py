@@ -83,7 +83,7 @@ def generate_plan(source, member, prompt=PROMPT, validator=validate_plan):
         body = {'model': os.environ.get('DEEPSEEK_MODEL', 'deepseek-flash'),
                 'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': source}],
                 'response_format': {'type': 'json_object'}, 'max_tokens': 6000, 'stream': False,
-                'thinking': {'type': 'disabled'}}
+                'thinking': {'type': 'enabled'}, 'reasoning_effort': 'max'}
         request = Request('https://api.deepseek.com/chat/completions', data=json.dumps(body).encode(),
                           headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
         try:

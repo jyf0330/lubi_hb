@@ -228,6 +228,8 @@ class Plans(unittest.TestCase):
             self.assertEqual(result['stated_minutes'], 480)
             payload = json.loads(send.call_args.args[0].data)
             self.assertEqual(payload['model'], 'deepseek-flash')
+            self.assertEqual(payload['thinking'], {'type': 'enabled'})
+            self.assertEqual(payload['reasoning_effort'], 'max')
             self.assertEqual(payload['response_format'], {'type': 'json_object'})
             self.assertEqual(payload['messages'][1]['content'], '做素材8小时')
             with self.assertRaises(ValueError): task_planner.generate_plan('再次生成', 'ZHC')

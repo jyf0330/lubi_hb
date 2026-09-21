@@ -68,7 +68,8 @@ def generate_analysis(context: dict[str, object], messages: object, member: str 
             ],
             "max_tokens": 2400,
             "stream": False,
-            "thinking": {"type": "disabled"},
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": "max",
         }
         request = Request(
             "https://api.deepseek.com/chat/completions",
