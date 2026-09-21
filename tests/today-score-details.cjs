@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const source = fs.readFileSync("server/static/employee.js", "utf8");
+const page = fs.readFileSync("server/static/employee.html", "utf8");
 const start = source.indexOf("function renderTodayScoreDetails");
 const end = source.indexOf("function renderEmployeeReminders", start);
 assert.ok(start >= 0 && end > start, "今日得分明细渲染函数应存在");
@@ -30,5 +31,9 @@ assert.match(html, /独立任务/);
 assert.match(html, /整理文档/);
 assert.equal((html.match(/2 点|3 点|1 点/g) || []).length, 3);
 assert.doesNotMatch(html, /<strong>5 点<\/strong>/);
+assert.match(source, /data-open-today-score[\s\S]*?showModal\(\)/);
+assert.match(page, /<dialog id="today-score-dialog" aria-labelledby="today-score-heading">/);
+assert.match(page, /<button id="close-today-score" type="button">关闭<\/button>/);
+assert.doesNotMatch(page, /class="today-score-details"/);
 
 console.log("TODAY_SCORE_DETAILS_OK");

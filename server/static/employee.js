@@ -91,7 +91,8 @@ function renderPersonal(data){
   $('#personal-role').textContent=data.is_admin?'管理员权限已启用':'成员工作台';
   $('#owner-dashboard').hidden=data.member!=='YWH';
   $('#owner-dashboard').href=new URL('../..',apiBase).href;
-  $('#personal-summary').innerHTML='<div><small>今日审核得分</small><strong>'+todayPoints+' 点</strong></div><div><small>近 7 天得分</small><strong>'+total+' 点</strong></div><div><small>等待审核</small><strong>'+data.tasks.filter(t=>t.status==='待验收').length+' 项</strong></div><div><small>当前高优先</small><strong>'+esc(high?.title||'暂无')+'</strong></div>';
+  $('#personal-summary').innerHTML='<button class="personal-score-card" type="button" data-open-today-score aria-haspopup="dialog" aria-controls="today-score-dialog"><small>今日审核得分</small><strong>'+todayPoints+' 点</strong><span>点击查看明细 →</span></button><div><small>近 7 天得分</small><strong>'+total+' 点</strong></div><div><small>等待审核</small><strong>'+data.tasks.filter(t=>t.status==='待验收').length+' 项</strong></div><div><small>当前高优先</small><strong>'+esc(high?.title||'暂无')+'</strong></div>';
+  $('#today-score-total').textContent=todayPoints+' 点';
   $('#personal-today-score').innerHTML=renderTodayScoreDetails(data.today_score_details||[]);
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
   $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
@@ -131,6 +132,10 @@ function renderEmployeeReminders(tasks){
   }
   $('#employee-reminder-list').innerHTML=reminders.join('');
 }
+$('#personal-summary').addEventListener('click',event=>{
+  if(event.target.closest('[data-open-today-score]'))$('#today-score-dialog').showModal();
+});
+$('#close-today-score').onclick=()=>$('#today-score-dialog').close();
 async function refresh(){
   const data=await api('me');user=data.name;items=data.tasks;offset=data.server_time-Date.now();
   const firstVisit=draftOwner!==user;
