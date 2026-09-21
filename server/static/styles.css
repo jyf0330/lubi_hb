@@ -99,6 +99,14 @@
 .action-group-review strong{font-size:17px}
 .action-group-review .hint{color:var(--muted)}
 
+/* Compact three-way filter for the owner's priority queue. */
+.action-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:-4px 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:#f6efe3}
+.action-filter{display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;padding:8px 5px;border-color:transparent;background:transparent;font-size:14px;white-space:nowrap}
+.action-filter b{display:grid;place-items:center;min-width:22px;height:22px;padding:0 5px;border-radius:999px;background:#eee3d2;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.action-filter[aria-selected=true]{border-color:#d4b99b;background:var(--panel);color:#75472f;box-shadow:0 1px 3px #453c3714}
+.action-filter[aria-selected=true] b{background:#f0e1c9;color:#815236}
+#actions[role=tabpanel]{min-width:0}
+
 /* Keep the secondary-dialog close action available while its details scroll. */
 dialog .detail-heading {
   position: sticky;

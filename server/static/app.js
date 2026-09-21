@@ -5,6 +5,7 @@ let dashboardDate = "";
 let dashboardApiRoot = null;
 let ownerLoggedIn = false;
 const statuses = ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞"];
+const PRIORITY_STATUSES = ["待验收", "阻塞", "需修改"];
 const names = { ZHC: "赵浩丞", YWT: "余文滔", YWH: "余文浩" };
 const WORK_SECONDS = 25 * 60;
 const REST_SECONDS = 5 * 60;
@@ -422,36 +423,99 @@ async function refresh() {
       </section>`;
     })
     .join("");
-  const actionStatuses = ["待验收", "需修改", "阻塞"];
-  const actions = tasks.filter((t) => actionStatuses.includes(t.status));
-  const taskById = new Map(tasks.map((task) => [task.id, task]));
-  const groupedChildIds = new Set();
-  const groupedActions = dashboardGroups
-    .map((group) => {
-      const children = group.tasks || [];
-      children.forEach((child) => groupedChildIds.add(child.id));
-      // A big task is accepted as a whole. Until every child is submitted we
-      // keep its pending children out of the owner's queue, so the owner is
-      // only asked to act once the whole big task is actually finished.
-      const ready = Boolean(group.ready_for_acceptance);
-      const visible = children
-        .filter((child) => actionStatuses.includes(child.status))
-        .filter((child) => ready || child.status !== "待验收")
-        .map((child) => ({ ...child, ...(taskById.get(child.id) || {}) }));
-      if (!ready && !visible.length) return null;
-      return renderActionGroup(group, visible, ready);
-    })
-    .filter(Boolean);
-  const standaloneActions = actions
-    .filter((task) => !groupedChildIds.has(task.id))
-    .map((task) => renderActionCard(task));
-  const actionEntries = [...groupedActions, ...standaloneActions];
-  document.querySelector("#action-count").textContent = actionEntries.length;
-  document.querySelector("#actions").innerHTML = actionEntries.length
-    ? actionEntries.join("")
-    : '<div class="empty">当前无需处理</div>';
+  const actionSections = collectPriorityActionSections(tasks, dashboardGroups);
+  const actionCount = new Set(
+    PRIORITY_STATUSES.flatMap((status) => actionSections[status].map((entry) => entry.key)),
+  ).size;
+  document.querySelector("#action-count").textContent = actionCount;
+  for (const status of PRIORITY_STATUSES) {
+    document.querySelector(`#action-count-${priorityStatusId(status)}`).textContent =
+      actionSections[status].length;
+  }
+  priorityActionSections = Object.fromEntries(
+    PRIORITY_STATUSES.map((status) => [
+      status,
+      actionSections[status].map((entry) =>
+        entry.type === "group"
+          ? renderActionGroup(entry.group, entry.tasks, entry.ready)
+          : renderActionCard(entry.task),
+      ),
+    ]),
+  );
+  renderPriorityActionStatus(document.querySelector("#actions").dataset.status || "待验收");
 }
 let dashboardTasks = [];
+let priorityActionSections = {};
+function priorityStatusId(status) {
+  return ({ 待验收: "review", 阻塞: "blocked", 需修改: "rework" })[status];
+}
+function collectPriorityActionSections(tasks, groups) {
+  const sections = Object.fromEntries(PRIORITY_STATUSES.map((status) => [status, []]));
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const groupedChildIds = new Set();
+  for (const group of groups) {
+    const children = group.tasks || [];
+    children.forEach((child) => groupedChildIds.add(child.id));
+    const ready = Boolean(group.ready_for_acceptance);
+    for (const status of PRIORITY_STATUSES) {
+      // Group acceptance remains all-or-nothing: pending children stay hidden
+      // until every child is submitted, while blocked/rework children remain actionable.
+      const visible = children
+        .filter((child) => child.status === status)
+        .filter(() => status !== "待验收" || ready)
+        .map((child) => ({ ...child, ...(taskById.get(child.id) || {}) }));
+      if (visible.length) {
+        sections[status].push({
+          type: "group",
+          key: `group:${group.id}`,
+          group,
+          tasks: visible,
+          ready: status === "待验收" && ready,
+        });
+      }
+    }
+  }
+  for (const task of tasks) {
+    if (groupedChildIds.has(task.id) || !PRIORITY_STATUSES.includes(task.status)) continue;
+    sections[task.status].push({ type: "task", key: `task:${task.id}`, task });
+  }
+  return sections;
+}
+function renderPriorityActionStatus(status) {
+  const selected = PRIORITY_STATUSES.includes(status) ? status : "待验收";
+  const panel = document.querySelector("#actions");
+  panel.dataset.status = selected;
+  panel.setAttribute("aria-labelledby", `action-tab-${priorityStatusId(selected)}`);
+  for (const button of document.querySelectorAll("[data-action-status]")) {
+    const active = button.dataset.actionStatus === selected;
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  }
+  const entries = priorityActionSections[selected] || [];
+  panel.innerHTML = entries.length
+    ? entries.join("")
+    : `<div class="empty">当前没有${selected}事项</div>`;
+}
+for (const button of document.querySelectorAll("[data-action-status]")) {
+  button.addEventListener("click", () => renderPriorityActionStatus(button.dataset.actionStatus));
+  button.addEventListener("keydown", (event) => {
+    const current = PRIORITY_STATUSES.indexOf(button.dataset.actionStatus);
+    const next = event.key === "ArrowRight"
+      ? (current + 1) % PRIORITY_STATUSES.length
+      : event.key === "ArrowLeft"
+        ? (current + PRIORITY_STATUSES.length - 1) % PRIORITY_STATUSES.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? PRIORITY_STATUSES.length - 1
+            : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    const target = document.querySelector(`[data-action-status="${PRIORITY_STATUSES[next]}"]`);
+    renderPriorityActionStatus(PRIORITY_STATUSES[next]);
+    target.focus();
+  });
+}
 const pages = ['overview','board','progress','daily','timeline'];
 function showPage(page, update=false) {
   if (!pages.includes(page)) page='overview';
