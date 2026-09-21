@@ -776,7 +776,7 @@ function renderScoreHistory(scoreRows=dashboardScores,tasks=dashboardTasks,first
     const unscored=dayRows.reduce((sum,row)=>sum+Number(row.unscored_count||0),0);
     const people=Object.keys(names).map(member=>{
       const row=dayRows.find(item=>item.assignee===member)||{points:0,completed_count:0,unscored_count:0};
-      const own=dayTasks.filter(task=>task.assignee===member).sort((a,b)=>Number(b.completed_at)-Number(a.completed_at));
+      const own=dayTasks.filter(task=>task.assignee===member).sort((a,b)=>Number(b.first_submitted_at??b.submitted_at??0)-Number(a.first_submitted_at??a.submitted_at??0)||Number(b.completed_at)-Number(a.completed_at));
       const list=own.length?`<ul>${own.map(task=>`<li><button type="button" class="score-task" data-task-id="${esc(task.id)}"><span><b>${esc(task.title)}</b><small>${task.group_title?`小任务 · 所属大任务：${esc(task.group_title)} · `:'历史任务（未区分大小） · '}${esc(taskLifecycleMeta(task))}</small></span><strong class="score-value">${task.awarded_points==null?'未打分':formatPoints(task.awarded_points)+' 点'}</strong></button></li>`).join('')}</ul>`:'<p class="score-empty">当天没有审核通过的任务</p>';
       return `<section class="score-person"><header><h4>${esc(names[member])}</h4><strong>${row.completed_count||0} 项 · ${formatPoints(row.points||0)} 点</strong></header>${list}${row.unscored_count?`<p class="score-warning">${row.unscored_count} 项历史任务未记录最终分数</p>`:''}</section>`;
     }).join('');

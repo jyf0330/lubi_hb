@@ -32,8 +32,8 @@ renderScoreHistory(
     { date: "2026-09-21", assignee: "YWH", points: 0, completed_count: 0, unscored_count: 0 },
   ],
   [
-    { id: "a", title: "草图", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 2, completed_at: 1, started_label: "09:30", submitted_label: "10:20" },
-    { id: "b", title: "导出", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 3, completed_at: 2, started_label: "10:30", submitted_label: "11:10" },
+    { id: "a", title: "草图", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 2, completed_at: 2, first_submitted_at: 100, started_label: "09:30", submitted_label: "10:20" },
+    { id: "b", title: "导出", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 3, completed_at: 1, first_submitted_at: 200, started_label: "10:30", submitted_label: "11:10" },
   ],
   [{ date: "2026-09-21", assignee: "ZHC", points: 7, unscored_count: 0 }],
   "2026-09-21",
@@ -47,6 +47,7 @@ assert.match(daily, /草图/);
 assert.match(daily, /2 点/);
 assert.match(daily, /导出/);
 assert.match(daily, /3 点/);
+assert.ok(daily.indexOf("导出") < daily.indexOf("草图"), "任务应按首次提交时间倒序，而不是审核完成时间倒序");
 assert.match(daily, /开始工作时间：09:30 · 首次提交时间：10:20/);
 assert.match(daily, /开始工作时间：10:30 · 首次提交时间：11:10/);
 assert.doesNotMatch(daily, /16:30 审核通过/);
