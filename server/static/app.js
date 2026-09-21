@@ -98,6 +98,19 @@ function timeDetails(t) {
     })
     .join("\n");
 }
+function taskLifecycleMeta(t) {
+  const sessions = Array.isArray(t.time_sessions) ? t.time_sessions : [];
+  const startedAt = sessions.reduce((earliest, session) => {
+    const value = Number(session.started_at);
+    return Number.isFinite(value) && (earliest === null || value < earliest)
+      ? value
+      : earliest;
+  }, null);
+  const submittedAt = t.first_submitted_at ?? t.submitted_at ?? null;
+  const timestamp = (value) =>
+    value === null ? null : `${shanghaiDate(value)} ${clock(value)}`;
+  return `开始工作时间：${timestamp(startedAt) || "未开始"} · 首次提交时间：${timestamp(submittedAt) || "未提交"}`;
+}
 function checkinMeta(task) {
   const checkin = task?.checkin;
   if (!checkin?.active) return null;
@@ -563,7 +576,7 @@ function renderTasks(){
   const list=dashboardTasks.filter(t=>taskMatchesFilters(t,filters)).sort((a,b)=>Number(b.priority==='高')-Number(a.priority==='高')||rank[a.status]-rank[b.status]);
   document.querySelector('#task-total').textContent=`显示 ${list.length} / ${dashboardTasks.length} 项`;
   document.querySelector('#task-groups').innerHTML=dashboardGroups.filter(g=>(!filters.owner||g.assignee===filters.owner)&&(!filters.status||g.status===filters.status)&&(!filters.search||(g.title+' '+g.tasks.map(t=>t.title).join(' ')).toLowerCase().includes(filters.search))&&(!filters.date||g.tasks.some(t=>t.planned_date===filters.date))).map(g=>`<article class="group-summary"><strong>${esc(g.title)}</strong><p>${esc(names[g.assignee]||g.assignee)} · ${esc(g.status)} · 验收通过 ${g.completed_count}/${g.total_count} 项${g.pending_count?` · 待验收 ${g.pending_count} 项 · 员工建议合计 ${formatPoints(g.suggested_points)} 点`:''}${g.status==='已完成'?` · 最终得分 ${formatPoints(g.awarded_points)} 点`:''} · ${g.stated_minutes==null?'未填写大任务参考时间':'大任务参考 '+g.stated_minutes+' 分钟'} · 小任务合计 ${g.estimated_minutes} 分钟 · 已记录 ${g.actual_minutes} 分钟</p><details><summary>交付与验收要求</summary><p>${esc(g.deliverable_expectation)}</p><p>${esc(g.acceptance_criteria)}</p></details></article>`).join('');
-  document.querySelector('#kanban').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${t.priority==='高'?'高优先 · ':''}${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.planned_date?`计划 ${t.planned_date}`:'未排期')} · ${esc(meta(t))}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.is_paused?'已暂停':t.status)}</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">没有符合条件的任务，可调整或清除筛选。</div>';
+  document.querySelector('#kanban').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${t.priority==='高'?'高优先 · ':''}${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.planned_date?`计划 ${t.planned_date}`:'未排期')} · ${esc(meta(t))}</span><span class="task-meta task-lifecycle">${esc(taskLifecycleMeta(t))}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">${esc(t.is_paused?'已暂停':t.status)}</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">没有符合条件的任务，可调整或清除筛选。</div>';
 }
 for(const id of ['owner-filter','status-filter','date-filter','task-search'])document.getElementById(id).addEventListener('input',renderTasks);
 document.querySelector('#clear-filters').onclick=()=>{for(const id of ['owner-filter','status-filter','date-filter','task-search'])document.getElementById(id).value='';renderTasks();};
