@@ -110,6 +110,26 @@ def apply(db, member, name, args, stamp, event, today):
     if not task:
         raise ValueError('找不到该任务。')
     task_id, status = task['id'], task['status']
+    if name == 'owner_close_task':
+        if member != 'YWH':
+            raise ValueError('只有负责人可以关闭任务。')
+        if status not in ('阻塞', '需修改'):
+            raise ValueError('只有阻塞或需修改的任务可以关闭。')
+        reason = str(args.get('reason') or '').strip()
+        if len(reason) > 1200:
+            raise ValueError('关闭说明最多 1200 字。')
+        db.execute(
+            "UPDATE work_sessions SET ended_at=?, end_reason='管理员关闭任务' WHERE task_id=? AND ended_at IS NULL",
+            (stamp, task_id),
+        )
+        changed = db.execute(
+            "UPDATE tasks SET status='已关闭', is_paused=0, priority='普通', updated_at=? WHERE id=? AND status=?",
+            (stamp, task_id, status),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务状态已变化，请刷新后重试。')
+        event(db, task_id, member, '管理员关闭任务', status, '已关闭', reason or '管理员关闭任务', stamp)
+        return {'message': f'已关闭任务：{task["title"]}。', 'task_id': task_id, 'status': '已关闭'}
     if name == 'work_set_high_priority':
         if member != task['assignee'] or not task['owner_inserted'] or status in ('已完成', '待验收'):
             raise ValueError('只能把自己尚未提交的负责人临时插单标为高优先。')

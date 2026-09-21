@@ -324,7 +324,7 @@ def day_snapshot(db: sqlite3.Connection, member: str, report_date: str, timestam
         "remaining_points": round(max(0, planned - completed), 1),
         "completion_rate": round(completed / planned * 100) if planned else 0,
         "actual_minutes": sum(int(task["actual_minutes"]) for task in tasks),
-        "status_counts": {status: sum(1 for task in tasks if task["status"] == status) for status in ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞"]},
+        "status_counts": {status: sum(1 for task in tasks if task["status"] == status) for status in ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞", "已关闭"]},
         "progress_updates": progress_updates,
         "tasks": tasks,
     }
@@ -381,7 +381,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     timestamp = now_ms()
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
-        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
+        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
             if attachments:
@@ -874,9 +874,10 @@ def task_groups(db, member=None):
                      awarded_points=sum(t["awarded_points"] for t in children if t["awarded_points"] is not None),
                      suggested_complete=bool(children) and all(t["employee_ai_points"] is not None for t in children),
                      ready_for_acceptance=bool(children) and all(x == "待验收" for x in states),
-                     status="已完成" if states and all(x == "已完成" for x in states) else
-                     "待验收" if states and all(x in ("已完成", "待验收") for x in states) else
-                     next((x for x in ("需修改", "阻塞", "进行中") if x in states), "进行中" if any(x in ("待验收", "已完成") for x in states) else "今日待办"))
+                     status=("已关闭" if states and all(x in ("已关闭", "已完成") for x in states) and "已关闭" in states else
+                             "已完成" if states and all(x == "已完成" for x in states) else
+                             "待验收" if states and all(x in ("已完成", "待验收") for x in states) else
+                             next((x for x in ("需修改", "阻塞", "进行中") if x in states), "进行中" if any(x in ("待验收", "已完成") for x in states) else "今日待办")))
         result.append(group)
     return result
 
@@ -903,6 +904,17 @@ def enrich_dashboard_tasks(db, tasks, timestamp):
         for task in tasks:
             task["time_sessions"] = task_sessions.get(task["id"], [])
     task_files.attach_metadata(db, tasks)
+    closed_ids = [task["id"] for task in tasks if task["status"] == "已关闭"]
+    if closed_ids:
+        placeholders = ",".join("?" for _ in closed_ids)
+        for row in db.execute(
+            f"SELECT task_id, actor, detail, created_at FROM task_events WHERE task_id IN ({placeholders}) AND event_type='管理员关闭任务' ORDER BY created_at DESC",
+            closed_ids,
+        ).fetchall():
+            task = next(item for item in tasks if item["id"] == row["task_id"] and "closed_at" not in item)
+            task["closed_at"] = row["created_at"]
+            task["closed_by"] = row["actor"]
+            task["close_reason"] = row["detail"]
 
 
 def dashboard_data() -> dict[str, object]:
@@ -1016,7 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")
@@ -1070,10 +1082,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with DB_LOCK, connect() as db:
                 promote_due_tasks(db, member, now_ms())
-                tasks = [dict(row) for row in db.execute("SELECT * FROM tasks WHERE assignee = ? AND status != '已完成' ORDER BY CASE WHEN priority='高' THEN 0 ELSE 1 END, created_at DESC", (member,))]
+                tasks = [dict(row) for row in db.execute("SELECT * FROM tasks WHERE assignee = ? AND status NOT IN ('已完成', '已关闭') ORDER BY CASE WHEN priority='高' THEN 0 ELSE 1 END, created_at DESC", (member,))]
                 for task in tasks:
                     task["actual_minutes"] = actual_minutes(db, task["id"], now_ms())
                 groups = task_groups(db, member)
+                for group in groups:
+                    group["tasks"] = [task for task in group["tasks"] if task["status"] != "已关闭"]
                 scores = [row for row in workflow.daily_scores(db, today()) if row['assignee'] == member]
                 completed = [dict(row) for row in db.execute("SELECT id,title,status,awarded_points,acceptance_result,result_summary,completed_at FROM tasks WHERE assignee=? AND status='已完成' ORDER BY completed_at DESC LIMIT 30", (member,))]
                 progress = [dict(row) for row in db.execute("SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at FROM progress_updates p JOIN tasks t ON t.id=p.task_id WHERE p.assignee=? AND t.assignee=? ORDER BY p.created_at DESC LIMIT 20", (member, member))]
