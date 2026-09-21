@@ -67,6 +67,9 @@ function timing(t) {
   const overdue = t.overdue ? " · 已延期" : "";
   return `实际 ${duration(Number(t.actual_minutes || 0) * 60000)} / 预计 ${duration(Number(t.estimated_minutes || 0) * 60000)} · ${["待验收", "已完成"].includes(t.status) ? (t.effort_status || "符合预估") : (Number(t.actual_minutes || 0) > Number(t.estimated_minutes || 0) ? "超出预估" : "尚未完成")}${reason}${overdue}`;
 }
+function isUnfinishedSubtask(task) {
+  return Boolean(task.group_id) && !["已完成", "已关闭", "已删除"].includes(task.status);
+}
 function meta(t) {
   if (t.status === "阻塞")
     return `${t.blocked_reason || "等待解除阻塞"}${t.overdue ? " · 已延期" : ""}`;
@@ -479,7 +482,7 @@ async function refresh() {
     overrun = tasks.filter((t) => t.effort_status === "超出预估"),
     overdue = tasks.filter((t) => t.overdue),
     checkinDue = people.filter((p) => p.active?.checkin?.due);
-  document.querySelector("#planned").textContent = `${tasks.filter(t=>t.status!=='已完成').length} 项`;
+  document.querySelector("#planned").textContent = `${tasks.filter(isUnfinishedSubtask).length} 项`;
   document.querySelector("#done").textContent = `${formatPoints(recentScore)} 点`;
   document.querySelector("#rate").textContent = "点击查看每天完成了什么 →";
   document.querySelector("#review-count").textContent = `${waiting.length} 项`;
