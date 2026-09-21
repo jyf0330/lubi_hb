@@ -95,6 +95,27 @@ function renderPersonal(data){
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
   $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+reportTimestamp(p.created_at,data.date)+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
+  renderEmployeeReminders(data.tasks||[]);
+}
+function renderEmployeeReminders(tasks){
+  const reminders=[];
+  const high=tasks.filter(t=>t.priority==='高'&&!['已完成','待验收','已关闭'].includes(t.status));
+  const attention=tasks.filter(t=>['阻塞','需修改'].includes(t.status)||t.is_paused);
+  const submitted=tasks.filter(t=>t.status==='待验收');
+  const running=tasks.filter(t=>t.status==='进行中'&&!t.is_paused);
+  const add=(kind,title,detail,view,label)=>reminders.push('<li data-kind="'+kind+'"><strong>'+esc(title)+'</strong><p>'+esc(detail)+'</p>'+(view?'<a href="#'+view+'">'+esc(label||'查看任务')+' →</a>':'')+'</li>');
+  if(high.length)add('urgent','高优先任务 · '+high.length+' 项',high.slice(0,2).map(t=>t.title).join('、')+(high.length>2?' 等':'')+'。负责人临时插单通常需要两小时内优先处理。','my-tasks','查看任务');
+  if(attention.length){
+    const labels=attention.slice(0,2).map(t=>t.title+'（'+(t.is_paused?'已暂停':t.status)+'）').join('、');
+    add('urgent','需要跟进 · '+attention.length+' 项',labels+(attention.length>2?' 等':'')+'。查看任务卡片中的原因，继续处理或及时记录进展。','my-tasks','处理任务');
+  }
+  if(submitted.length)add('normal','等待验收 · '+submitted.length+' 项','已提交的任务无需重复提交；负责人验收通过后才会计入每日得分。','my-tasks','查看待验收');
+  if(running.length)add('normal','记得记录进展', '进行中的任务每累计 30 个有效工作分钟记录一次 hb，遇到问题也可以随时补报。','hb','去写 hb');
+  if(!reminders.length){
+    if(tasks.some(t=>!['已完成','已关闭'].includes(t.status)))add('good','目前没有紧急提醒','按任务卡片中的交付内容和验收标准推进即可。','my-tasks','查看任务');
+    else add('good','还没有待处理任务','登记今天的工作，确认交付内容和验收标准后再开始计时。','work-tools','登记新工作');
+  }
+  $('#employee-reminder-list').innerHTML=reminders.join('');
 }
 async function refresh(){
   const data=await api('me');user=data.name;items=data.tasks;offset=data.server_time-Date.now();
