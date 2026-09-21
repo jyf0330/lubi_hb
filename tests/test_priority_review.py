@@ -130,6 +130,66 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(resubmitted['status'], '待验收')
         self.assertEqual(resubmitted['first_submitted_at'], submitted)
 
+    def test_employee_can_update_own_pending_submission_without_resubmitting(self):
+        task_id = self.insert()
+        submitted = stamp('2026-09-14T09:45:00')
+        with patch.object(app, 'now_ms', return_value=stamp('2026-09-14T09:30:00')):
+            self.call('work_start_task', {'task_id': task_id})
+        with patch.object(app, 'now_ms', return_value=submitted):
+            self.call('work_finish_task', {
+                'task_id': task_id,
+                'summary': '初次完成说明',
+                'employee_points': 3,
+                'employee_reason': '初次估分',
+            })
+        with app.connect() as db:
+            db.execute(
+                'UPDATE tasks SET platform_ai_points=4,platform_ai_reason=? WHERE id=?',
+                ('旧建议', task_id),
+            )
+
+        with patch.object(app, 'now_ms', return_value=stamp('2026-09-14T10:00:00')):
+            result = self.call('work_update_submission', {
+                'task_id': task_id,
+                'summary': '修正后的完成说明',
+                'employee_points': 7,
+                'employee_reason': '补充核对后修正',
+            })
+
+        self.assertEqual(result['status'], '待验收')
+        self.assertEqual(result['employee_points'], 7)
+        updated = self.task(task_id)
+        self.assertEqual(updated['status'], '待验收')
+        self.assertEqual(updated['submitted_at'], submitted)
+        self.assertEqual(updated['first_submitted_at'], submitted)
+        self.assertEqual(updated['first_submitted_points'], 3)
+        self.assertEqual(updated['result_summary'], '修正后的完成说明')
+        self.assertEqual(updated['employee_ai_points'], 7)
+        self.assertEqual(updated['employee_ai_reason'], '补充核对后修正')
+        self.assertIsNone(updated['platform_ai_points'])
+        self.assertIsNone(updated['platform_ai_reason'])
+        with app.connect() as db:
+            row = db.execute(
+                "SELECT detail FROM task_events WHERE task_id=? AND event_type='修改待验收内容'",
+                (task_id,),
+            ).fetchone()
+        self.assertIn('初次完成说明', row['detail'])
+        self.assertIn('修正后的完成说明', row['detail'])
+
+        with self.assertRaisesRegex(ValueError, '找不到该员工'):
+            self.call('work_update_submission', {
+                'task_id': task_id,
+                'summary': '越权修改',
+                'employee_points': 99,
+            }, 'YWT')
+        self.call('owner_review_task', {'task_id': task_id, 'decision': 'accept'}, 'YWH')
+        with self.assertRaisesRegex(ValueError, '只有负责人尚未处理'):
+            self.call('work_update_submission', {
+                'task_id': task_id,
+                'summary': '验收后修改',
+                'employee_points': 9,
+            })
+
     def test_first_review_submission_date_survives_rework(self):
         task_id = self.insert()
         first_submitted = stamp('2026-09-14T09:45:00')

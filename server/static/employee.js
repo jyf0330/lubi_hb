@@ -3,7 +3,7 @@ $('#ai-plan').textContent = 'AI 整理（DeepSeek）';
 let draftOwner = null;
 let heartbeatImages = [];
 let heartbeatArchives = [];
-let user = null, items = [], groupCache = [], busy = false, selected = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null;
+let user = null, items = [], groupCache = [], busy = false, selected = null, editingSubmissionId = null, actionImages = [], actionFiles = [], appendGroupId = null, appendRequestId = null, audio = null, sound = false, offset = 0, lastPhase = null, playing = [], todoDate = null, todoBaseDate = null;
 const apiBase = new URL(location.pathname.endsWith('/employee/') ? '../api/employee/' : 'api/employee/', location.href);
 const taskApiRoot = new URL('../', apiBase);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,7 +16,7 @@ async function api(path, data){
 }
 function tab(name){for(const n of ['todo','work','end']){$('#'+n).hidden=n!==name;document.querySelector('[data-tab='+n+']').setAttribute('aria-selected',String(n===name));}}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
-const views = ['my-tasks','hb','work-tools'];
+const views = ['my-tasks','pending-scores','hb','work-tools'];
 function showView(name, updateUrl=false){
   if(!views.includes(name))name='my-tasks';
   for(const key of views){
@@ -97,7 +97,20 @@ function renderPersonal(data){
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
   $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+reportTimestamp(p.created_at,data.date)+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
+  renderPendingReviewScores(data.tasks||[],data.groups||[]);
   renderEmployeeReminders(data.tasks||[]);
+}
+function renderPendingReviewScores(tasks,groups){
+  const pending=tasks.filter(task=>task.status==='待验收');
+  const groupNames=new Map(groups.map(group=>[group.id,group.title]));
+  const total=pending.reduce((sum,task)=>sum+Number(task.employee_ai_points||0),0);
+  $('#pending-score-count').textContent=pending.length;
+  $('#pending-score-total').textContent='申请合计 '+total+' 点';
+  $('#pending-score-list').innerHTML=pending.length?pending.map(task=>{
+    const group=task.group_id?'<small>大任务 · '+esc(groupNames.get(task.group_id)||'未命名大任务')+'</small>':'';
+    const points=task.employee_ai_points==null?'未填写':esc(task.employee_ai_points)+' 点';
+    return '<button type="button" class="pending-score-item" data-edit-submission="'+esc(task.id)+'"><span class="pending-score-copy">'+group+'<strong>'+esc(task.title)+'</strong><span>'+esc(task.result_summary||'未填写完成说明')+'</span></span><span class="pending-score-value"><strong>'+points+'</strong><small>申请得分</small><em>修改 →</em></span></button>';
+  }).join(''):'<div class="empty">当前没有待验收任务。提交任务后，会在这里集中显示申请得分。</div>';
 }
 function renderTodayScoreDetails(tasks){
   if(!tasks.length)return '<p>今天还没有审核通过的任务。</p>';
@@ -158,7 +171,7 @@ async function refresh(){
     if(t.status==='阻塞')buttons+=button('work_unblock_task','解除阻塞');
     if(['今日待办','需修改'].includes(t.status))buttons+=button('work_start_task','开始');
     if(t.status==='进行中'){buttons+=button(t.is_paused?'work_resume_task':'work_pause_task',t.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
-    if(t.status==='待验收')buttons+=button('work_withdraw_submission','取消待验收并重写');
+    if(t.status==='待验收')buttons+=button('work_update_submission','修改待验收内容')+button('work_withdraw_submission','取消待验收并重写');
     if(['今日待办','进行中','需修改'].includes(t.status))buttons+=button('work_block_task','遇到阻塞');
     return '<article class="task '+(t.priority==='高'?'high-priority':'')+'">'+(t.owner_inserted?'<p class="priority-label">'+(t.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(t.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(t.is_paused?'已暂停':t.status==='进行中'&&running.length>1?'进行中 · 并行':t.status)+'</span><h3>'+esc(t.title)+'</h3><p>'+esc(t.type)+' · 预计 '+t.estimated_minutes+' 分钟 · 已记录 '+t.actual_minutes+' 分钟</p><p>'+esc(t.acceptance_result||t.blocked_reason||t.deliverable_expectation||t.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(t.attachments,taskApiRoot)+'<div class="buttons">'+buttons+'</div></article>';
   };
@@ -175,6 +188,28 @@ async function run(action,args){
   catch(e){notice(e.message,true);return false;}
   finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);if(workPlan)checkPlan();else $('#confirm-plan').disabled=true;}
 }
+function openSubmissionEditor(taskId){
+  const task=items.find(item=>item.id===taskId&&item.status==='待验收');
+  if(!task){notice('任务已被处理，请刷新后重试。',true);return;}
+  editingSubmissionId=task.id;
+  $('#submission-edit-form').reset();
+  $('#submission-task-title').textContent=task.title;
+  $('#submission-edit-form [name="summary"]').value=task.result_summary||'';
+  $('#submission-edit-form [name="employee_points"]').value=task.employee_ai_points??'';
+  $('#submission-edit-form [name="employee_reason"]').value=task.employee_ai_reason||'';
+  $('#submission-edit-dialog').showModal();
+}
+$('#pending-score-list').onclick=e=>{const button=e.target.closest('[data-edit-submission]');if(button&&!busy)openSubmissionEditor(button.dataset.editSubmission);};
+$('#submission-edit-cancel').onclick=()=>{editingSubmissionId=null;$('#submission-edit-dialog').close();};
+$('#submission-edit-form').onsubmit=async e=>{
+  e.preventDefault();
+  if(!editingSubmissionId||busy)return;
+  const data=Object.fromEntries(new FormData(e.target));
+  if(await run('work_update_submission',{task_id:editingSubmissionId,summary:data.summary,employee_points:Number(data.employee_points),employee_reason:data.employee_reason})){
+    editingSubmissionId=null;
+    $('#submission-edit-dialog').close();
+  }
+};
 $('#login').onsubmit=async e=>{e.preventDefault();try{await api('login',{name:new FormData(e.target).get('name')});await refresh();notice('欢迎回来，'+user+'。');}catch(err){notice(err.message,true);}};
 $('#logout').onclick=async()=>{if(busy)return;await api('logout',{});clearHeartbeatImages();clearActionImages();actionFiles=[];renderTaskFiles();$('#heartbeat').reset();user=null;draftOwner=null;workPlan=null;planRequestId=null;appendGroupId=null;appendRequestId=null;if($('#append-dialog').open)$('#append-dialog').close();$('#work-text').value='';renderPlan();$('#workspace').hidden=true;$('#welcome').hidden=false;$('#logout').hidden=true;$('#identity').textContent='我的工作台';};
 $('#draft').oninput=e=>{if(todoDate)storage(todoStorageKey(todoDate),e.target.value);$('#draft-saved').textContent='已保存在此浏览器';};
@@ -476,7 +511,8 @@ $('#tasks').onclick=async e=>{
   if(!b)return;
   selected={action:b.dataset.action,id:b.dataset.id};
   if(selected.action==='work_withdraw_submission'&&!window.confirm('取消待验收后需要重新继续任务并提交，确定撤回吗？'))return;
-  if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();$('#action-form [name="employee_points"]').required=selected.action==='work_finish_task';clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
+  if(selected.action==='work_update_submission')openSubmissionEditor(selected.id);
+  else if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();$('#action-form [name="employee_points"]').required=selected.action==='work_finish_task';clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
   else await run(selected.action,{task_id:selected.id});
 };
 $('#cancel').onclick=()=>{clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').close();};
