@@ -1,5 +1,6 @@
 let dashboardGroups = [];
 let dashboardScores = [];
+let dashboardFirstSubmissionScores = [];
 let dashboardProgress = [];
 let dashboardDate = "";
 let dashboardApiRoot = null;
@@ -321,9 +322,9 @@ async function refresh() {
   if (!response.ok) throw new Error("服务器数据读取失败");
   const data = await response.json();
   dashboardGroups = data.groups || [];
-  dashboardScores = data.first_submission_scores || [];
+  dashboardScores = data.scores || [];
+  dashboardFirstSubmissionScores = data.first_submission_scores || [];
   dashboardDate = data.date;
-  renderScoreHistory();
   const tasks = data.tasks.map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
   detectReworks(tasks);
   const sessions = data.sessions;
@@ -334,8 +335,8 @@ async function refresh() {
       session = active
         ? sessions.find((s) => s.task_id === active.id && !s.ended_at)
         : null,
-      todayFirstScore = dashboardScores.find(r=>r.date===data.date&&r.assignee===id)?.points || 0;
-    return { id, own, active, session, todayFirstScore };
+      todayScore = dashboardScores.find(r=>r.date===data.date&&r.assignee===id);
+    return { id, own, active, session, todayScore };
   });
   const recentScore = dashboardScores.reduce((sum, row) => sum + row.points, 0),
     waiting = tasks.filter((t) => t.status === "待验收"),
@@ -346,7 +347,7 @@ async function refresh() {
     checkinDue = people.filter((p) => p.active?.checkin?.due);
   document.querySelector("#planned").textContent = `${tasks.filter(t=>t.status!=='已完成').length} 项`;
   document.querySelector("#done").textContent = `${formatPoints(recentScore)} 点`;
-  document.querySelector("#rate").textContent = "点击查看每天的分数 →";
+  document.querySelector("#rate").textContent = "点击查看每天完成了什么 →";
   document.querySelector("#review-count").textContent = `${waiting.length} 项`;
   document.querySelector("#blocked-count").textContent = `${blocked.length} 项`;
   document.querySelector("#brief-title").textContent =
@@ -362,7 +363,7 @@ async function refresh() {
           ? ` type="button" data-person-task-id="${esc(p.active.id)}" aria-label="查看 ${esc(names[p.id])} 的任务详情"`
           : "",
         actionClass = p.active ? " person-action" : "";
-      return `<${tag} class="person ${p.id.toLowerCase()}${actionClass}"${action}><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.session.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日首次提交 ${formatPoints(p.todayFirstScore)} 点</span><span>近 5 个工作日 ${formatPoints(recent)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p>${p.active ? '<span class="person-detail-link">查看任务详情 →</span>' : ""}</${tag}>`;
+      return `<${tag} class="person ${p.id.toLowerCase()}${actionClass}"${action}><div class="person-top"><div class="avatar">${p.id}</div><div><small>${esc(names[p.id])}</small><h3>${p.active?.priority==='高'?'高优先 · ':''}${esc(p.active?.title || "当前没有进行中的任务")}</h3><p>${p.session ? `${esc(p.active.type)} · ${clock(p.session.started_at)} 开始` : p.active?.status==='待验收'?"等待审核 · 已停止计时":p.active?"当前未计时":"尚未开始计时"}</p></div><span class="state">${p.active?.is_paused ? "已暂停" : esc(p.active?.status || "未记录")}</span></div>${checkin ? `<div class="checkin ${checkin.due ? "due" : "ok"}"><strong>${esc(checkin.label)}</strong><span>${esc(checkin.detail)}</span></div>` : ""}<div class="bar-copy"><span>今日完成 ${p.todayScore?.completed_count||0} 项 · ${formatPoints(p.todayScore?.points||0)} 点</span><span>近 7 天 ${formatPoints(recent)} 点</span></div><p>正在计时 ${p.own.filter(t=>t.status==='进行中'&&!t.is_paused).length} 项${p.active?.priority==='高'?' · 高优先通常两小时以内':''}</p>${p.active ? '<span class="person-detail-link">查看任务详情 →</span>' : ""}</${tag}>`;
     })
     .join("");
   const progress = data.progress_updates || [];
@@ -392,6 +393,7 @@ async function refresh() {
     })
     .join("");
   dashboardTasks = (data.all_tasks || data.tasks).map(t=>({...t,group_title:dashboardGroups.find(g=>g.id===t.group_id)?.title||''}));
+  renderScoreHistory();
   renderTasks();
   renderClosedTasks();
   const reports = data.reports || [],
@@ -621,6 +623,7 @@ async function reviewGroup(groupId,button){
 }
 for(const id of ['kanban','closed-tasks','actions','progress-pending'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
+document.querySelector('#daily-completion-scores').onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
 document.querySelector('[data-score-details]').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'center'});
 function showProgressDetail(assignee){
@@ -643,9 +646,24 @@ document.querySelector('#progress-people').onclick = (event) => {
   if (button) showProgressDetail(button.dataset.progressPerson);
 };
 document.querySelector('#close-progress-detail').onclick = () => document.querySelector('#progress-detail').close();
-function renderScoreHistory(){
-  const dates=[...new Set(dashboardScores.map(r=>r.date))].reverse();
-  document.querySelector('#score-history').innerHTML='<table><thead><tr><th>日期</th>'+Object.values(names).map(n=>'<th>'+esc(n)+'</th>').join('')+'</tr></thead><tbody>'+dates.map(date=>'<tr><th>'+date+'</th>'+Object.keys(names).map(member=>{const row=dashboardScores.find(r=>r.date===date&&r.assignee===member);return '<td>'+row.points+' 点'+(row.unscored_count?'（'+row.unscored_count+' 项首次分数未记录）':'')+'</td>';}).join('')+'</tr>').join('')+'</tbody></table>';
+function renderScoreHistory(scoreRows=dashboardScores,tasks=dashboardTasks,firstRows=dashboardFirstSubmissionScores,currentDate=dashboardDate){
+  const dates=[...new Set(scoreRows.map(row=>row.date))].reverse();
+  document.querySelector('#daily-completion-scores').innerHTML=dates.map(date=>{
+    const dayRows=scoreRows.filter(row=>row.date===date);
+    const dayTasks=tasks.filter(task=>task.status==='已完成'&&task.completed_at&&shanghaiDate(task.completed_at)===date);
+    const totalPoints=dayRows.reduce((sum,row)=>sum+Number(row.points||0),0);
+    const totalTasks=dayRows.reduce((sum,row)=>sum+Number(row.completed_count||0),0);
+    const unscored=dayRows.reduce((sum,row)=>sum+Number(row.unscored_count||0),0);
+    const people=Object.keys(names).map(member=>{
+      const row=dayRows.find(item=>item.assignee===member)||{points:0,completed_count:0,unscored_count:0};
+      const own=dayTasks.filter(task=>task.assignee===member).sort((a,b)=>Number(b.completed_at)-Number(a.completed_at));
+      const list=own.length?`<ul>${own.map(task=>`<li><button type="button" class="score-task" data-task-id="${esc(task.id)}"><span><b>${esc(task.title)}</b><small>${task.group_title?`小任务 · 所属大任务：${esc(task.group_title)} · `:'历史任务（未区分大小） · '}${clock(task.completed_at)} 审核通过</small></span><strong class="score-value">${task.awarded_points==null?'未打分':formatPoints(task.awarded_points)+' 点'}</strong></button></li>`).join('')}</ul>`:'<p class="score-empty">当天没有审核通过的任务</p>';
+      return `<section class="score-person"><header><h4>${esc(names[member])}</h4><strong>${row.completed_count||0} 项 · ${formatPoints(row.points||0)} 点</strong></header>${list}${row.unscored_count?`<p class="score-warning">${row.unscored_count} 项历史任务未记录最终分数</p>`:''}</section>`;
+    }).join('');
+    return `<details class="daily-score-day"${date===currentDate?' open':''}><summary><span><b>${esc(date)}</b>${date===currentDate?'<small>今天</small>':''}</span><strong>${totalTasks} 项 · ${formatPoints(totalPoints)} 点</strong></summary><p class="score-rule">大任务只负责归类与汇总，不单独计分；下列小任务的最终得分只相加一次。${unscored?`另有 ${unscored} 项历史任务未记录分数。`:''}</p><div class="daily-score-people">${people}</div></details>`;
+  }).join('');
+  const firstDates=[...new Set(firstRows.map(row=>row.date))].reverse();
+  document.querySelector('#score-history').innerHTML='<table><thead><tr><th>日期</th>'+Object.values(names).map(name=>'<th>'+esc(name)+'</th>').join('')+'</tr></thead><tbody>'+firstDates.map(date=>'<tr><th>'+date+'</th>'+Object.keys(names).map(member=>{const row=firstRows.find(item=>item.date===date&&item.assignee===member)||{points:0,unscored_count:0};return '<td>'+formatPoints(row.points)+' 点'+(row.unscored_count?'（'+row.unscored_count+' 项首次分数未记录）':'')+'</td>';}).join('')+'</tr>').join('')+'</tbody></table>';
 }
 async function ownerApi(path,data){
   const response=await fetch('api/employee/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Team-Request':'employee'},body:JSON.stringify(data)});
