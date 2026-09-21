@@ -12,7 +12,7 @@ assert.match(app, /class="detail-chip"><b>/);
 assert.match(app, /class="detail-fields">/);
 assert.match(app, /class="detail-field"><dt>/);
 assert.match(app, /<aside class="detail-side" id="detail-side">/);
-assert.match(app, /content\.classList\.toggle\('has-review',canReview\|\|canClose\|\|canEditScore\)/);
+assert.match(app, /content\.classList\.toggle\('has-review',canReview\|\|canClose\|\|canEditScore\|\|canRestore\)/);
 assert.match(app, /function clampDetailFields\(\)/);
 assert.match(app, /classList\.add\('is-clamped'\)/);
 assert.match(app, /'展开全文'/);
@@ -21,7 +21,7 @@ assert.match(
   /querySelector\('#task-detail'\)\.showModal\(\);\s*\n\s*clampDetailFields\(\);/,
 );
 // 待验收任务及负责人可关闭的阻塞/返工任务显示右栏，其他状态单栏满宽。
-assert.match(app, /\(canReview\|\|canClose\|\|canEditScore\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
+assert.match(app, /\(canReview\|\|canClose\|\|canEditScore\|\|canRestore\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
 assert.match(app, /function appendScoreEditForm\(t\)/);
 assert.match(app, /action:'owner_set_task_score'/);
 assert.match(app, /class="timeline-event kind-\$\{item\.type\}" data-task-id="\$\{esc\(item\.task_id\)\}"/);

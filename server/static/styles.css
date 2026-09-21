@@ -201,6 +201,7 @@ dialog .detail-heading {
 .close-task-panel { display: grid; gap: 10px; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; }
 .close-task-panel label { display: grid; gap: 6px; font-size: 14px; }
 .close-task-panel textarea { font: inherit; padding: 10px; border: 1px solid #aaa; border-radius: 8px; width: 100%; box-sizing: border-box; }
+.deleted-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0}.deleted-filters button{display:flex;align-items:center;justify-content:space-between}.deleted-filters button[aria-selected="true"]{background:var(--cyan);border-color:var(--cyan);color:#fff}.deleted-filters b{display:grid;place-items:center;min-width:28px;height:28px;padding:0 7px;border-radius:999px;background:#eee5d9;color:#674d3c}.deleted-task-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:#fffefa}.deleted-task-row .task-main{display:grid}.restore-task-button{border-color:#7ca47b;color:#315e35;background:#f2f8ef}.restore-task-panel{display:grid;gap:10px;margin-top:14px;padding:14px;border:1px solid #b8cdb4;border-radius:12px;background:#f7fbf4}@media(max-width:680px){.deleted-task-row{grid-template-columns:1fr 1fr}.deleted-task-row .task-main{grid-column:1/-1}.deleted-task-row button{width:100%}}
 .status-6 { background: #e8e1ed; color: #5d426e; }
 #detail-side #review-form {
   gap: 8px;

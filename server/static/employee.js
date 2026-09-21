@@ -97,7 +97,7 @@ function renderPersonal(data){
   $('#today-score-total').textContent=todayPoints+' 点';
   $('#personal-today-score').innerHTML=renderTodayScoreDetails(data.today_score_details||[]);
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
-  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
+  $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'<button type="button" class="delete-task-button" data-delete-task="'+esc(t.id)+'">删除任务</button></article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+reportTimestamp(p.created_at,data.date)+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
   renderPendingReviewScores(data.tasks||[],data.groups||[]);
   renderEmployeeReminders(data.tasks||[]);
@@ -177,6 +177,7 @@ function renderEmployeeTaskBoard(){
     if(task.status==='进行中'){buttons+=button(task.is_paused?'work_resume_task':'work_pause_task',task.is_paused?'继续':'暂停')+button('work_finish_task','提交这一项待验收');}
     if(task.status==='待验收')buttons+=button('work_update_submission','修改待验收内容')+button('work_withdraw_submission','取消待验收并重写');
     if(['今日待办','进行中','需修改'].includes(task.status))buttons+=button('work_block_task','遇到阻塞');
+    buttons+=button('work_delete_task','删除任务');
     return '<article class="task '+(task.priority==='高'?'high-priority':'')+'">'+(task.owner_inserted?'<p class="priority-label">'+(task.priority==='高'?'高优先 · 负责人临时插单':'负责人临时插单 · '+(task.status==='待验收'?'待审核':'可手动标高'))+' · 通常两小时以内</p>':'')+'<span class="badge">'+esc(task.is_paused?'已暂停':task.status==='进行中'&&running.length>1?'进行中 · 并行':task.status)+'</span><h3>'+esc(task.title)+'</h3><p>'+esc(task.type)+' · 预计 '+task.estimated_minutes+' 分钟 · 已记录 '+task.actual_minutes+' 分钟</p><p>'+esc(task.acceptance_result||task.blocked_reason||task.deliverable_expectation||task.acceptance_criteria||'')+'</p>'+(appendReason?'<p class="hint">补充原因：'+esc(appendReason)+'</p>':'')+taskAttachmentGallery(task.attachments,taskApiRoot)+'<div class="buttons">'+buttons+'</div></article>';
   };
   const grouped=groupCache.map(group=>{
@@ -547,9 +548,16 @@ $('#tasks').onclick=async e=>{
   if(!b)return;
   selected={action:b.dataset.action,id:b.dataset.id};
   if(selected.action==='work_withdraw_submission'&&!window.confirm('取消待验收后需要重新继续任务并提交，确定撤回吗？'))return;
+  if(selected.action==='work_delete_task'&&!window.confirm('确认删除这个任务？删除后你将无法查看或恢复；服务端数据会完整保留，仅管理员可在删除区处理。'))return;
   if(selected.action==='work_update_submission')openSubmissionEditor(selected.id);
   else if(['work_finish_task','work_block_task'].includes(selected.action)){$('#action-title').textContent=selected.action==='work_finish_task'?'完成说明':'阻塞原因';$('#ai-score-fields').hidden=selected.action!=='work_finish_task';$('#action-form').reset();$('#action-form [name="employee_points"]').required=selected.action==='work_finish_task';clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').showModal();}
   else await run(selected.action,{task_id:selected.id});
+};
+$('#personal-completed').onclick=async e=>{
+  if(busy)return;
+  const button=e.target.closest('[data-delete-task]');
+  if(!button||!window.confirm('确认删除这个已经验收的任务？删除后它不会参与任何统计，只有管理员能在删除区查看和恢复。'))return;
+  await run('work_delete_task',{task_id:button.dataset.deleteTask});
 };
 $('#cancel').onclick=()=>{clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').close();};
 $('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const note=$('#action-file-status');try{note.textContent=actionImages.length||actionFiles.length?'正在读取截图和附件，请稍候…':'';const prepared=await Promise.all(actionImages.map(({file})=>compressHeartbeatImage(file)));const files=await Promise.all(actionFiles.map(item=>readTaskFile(item.file)));const attachments=[...prepared.map(image=>image.payload),...files];const args={task_id:selected.id,attachments,...(selected.action==='work_finish_task'?{summary:d.detail,employee_points:Number(d.employee_points),employee_reason:d.employee_reason}:{reason:d.detail})};if(await run(selected.action,args)){clearActionImages();actionFiles=[];renderTaskFiles();$('#action-dialog').close();}}catch(error){note.textContent=error.message;notice(error.message,true);}};

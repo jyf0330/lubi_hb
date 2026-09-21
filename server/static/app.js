@@ -1,4 +1,6 @@
 let dashboardGroups = [];
+let dashboardDeletedTasks = [];
+let deletedFilter = "pending";
 let dashboardScores = [];
 let dashboardFirstSubmissionScores = [];
 let dashboardProgress = [];
@@ -434,6 +436,7 @@ async function refresh() {
   if (!response.ok) throw new Error("服务器数据读取失败");
   const data = await response.json();
   dashboardGroups = data.groups || [];
+  dashboardDeletedTasks = data.deleted_tasks || [];
   dashboardScores = data.scores || [];
   dashboardFirstSubmissionScores = data.first_submission_scores || [];
   dashboardDate = data.date;
@@ -527,6 +530,7 @@ async function refresh() {
   renderScoreHistory();
   renderTasks();
   renderClosedTasks();
+  renderDeletedTasks();
   const reports = data.reports || [],
     tomorrow = data.tomorrow_tasks || [];
   document.querySelector("#report-count").textContent =
@@ -638,8 +642,9 @@ for (const button of document.querySelectorAll("[data-action-status]")) {
     target.focus();
   });
 }
-const pages = ['overview','board','closed','progress','daily','timeline','ai-analysis'];
+const pages = ['overview','board','closed','deleted','progress','daily','timeline','ai-analysis'];
 function showPage(page, update=false) {
+  if(page==='deleted'&&!ownerLoggedIn)page='overview';
   if (!pages.includes(page)) page='overview';
   for (const key of pages) {
     document.getElementById(key).hidden=key!==page;
@@ -697,6 +702,17 @@ function renderClosedTasks(){
   document.querySelector('#closed-count').textContent=`${list.length} 项`;
   document.querySelector('#closed-tasks').innerHTML=list.length?list.map(t=>`<button type="button" class="task task-row" data-task-id="${esc(t.id)}"><span class="task-main"><strong>${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · ${esc(t.close_reason||'管理员关闭')}</span></span><span class="status-badge status-${statuses.indexOf(t.status)}">已关闭</span><span class="detail-link">查看详情 →</span></button>`).join(''):'<div class="empty">目前没有已关闭的任务</div>';
 }
+function deletedTaskCategory(task){return task.deleted_from_status==='已完成'?'accepted':'pending';}
+function renderDeletedTasks(){
+  const pending=dashboardDeletedTasks.filter(task=>deletedTaskCategory(task)==='pending');
+  const accepted=dashboardDeletedTasks.filter(task=>deletedTaskCategory(task)==='accepted');
+  document.querySelector('#deleted-count').textContent=`${dashboardDeletedTasks.length} 项`;
+  document.querySelector('#deleted-count-pending').textContent=pending.length;
+  document.querySelector('#deleted-count-accepted').textContent=accepted.length;
+  for(const button of document.querySelectorAll('[data-deleted-filter]'))button.setAttribute('aria-selected',String(button.dataset.deletedFilter===deletedFilter));
+  const list=deletedFilter==='accepted'?accepted:pending;
+  document.querySelector('#deleted-tasks').innerHTML=list.length?list.map(t=>`<article class="deleted-task-row"><span class="task-main"><strong>${esc(t.title)}</strong>${t.group_title?`<span class="task-meta">所属大任务：${esc(t.group_title)}</span>`:''}<span class="task-meta">${esc(names[t.assignee]||t.assignee||'未指派')} · 删除前：${esc(t.deleted_from_status||'未知')} · ${t.deleted_at?`${shanghaiDate(t.deleted_at)} ${clock(t.deleted_at)} 删除`:''}</span></span><button type="button" data-task-id="${esc(t.id)}">查看详情</button><button type="button" class="restore-task-button" data-restore-task="${esc(t.id)}">恢复任务</button></article>`).join(''):`<div class="empty">当前没有${deletedFilter==='accepted'?'已经验收':'待修改'}的删除任务</div>`;
+}
 function renderTaskEvidence(t){
   const deliverables = (t.deliverables || []).map((item) => `<li><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label || item.kind || "交付链接")} ↗</a></li>`).join("");
   const progress = dashboardTimelineProgress.filter((item) => item.task_id === t.id).slice(0,8);
@@ -707,24 +723,32 @@ function renderTaskEvidence(t){
   return evidence + progressHtml + eventsHtml;
 }
 function showDetail(id){
-  const t=dashboardTasks.find(t=>t.id===id);if(!t)return;
+  const t=dashboardTasks.find(t=>t.id===id)||dashboardDeletedTasks.find(t=>t.id===id);if(!t)return;
   let appendReason='';if(t.notes){try{appendReason=JSON.parse(t.notes).append_reason||'';}catch{}}
-  const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['关闭时间',t.closed_at?`${shanghaiDate(t.closed_at)} ${clock(t.closed_at)}`:''],['关闭人',t.closed_by],['关闭说明',t.close_reason],['用时',timing(t)],['用时详情',timeDetails(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工自评分',t.employee_ai_points==null?'未填写':t.employee_ai_points+' 点'+(t.employee_ai_reason?' · '+t.employee_ai_reason:'')],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
+  const fields=[['所属大任务',t.group_title],['负责人',names[t.assignee]||t.assignee||'未指派'],['状态',t.is_paused?'已暂停':t.status],['删除前状态',t.deleted_from_status],['删除时间',t.deleted_at?`${shanghaiDate(t.deleted_at)} ${clock(t.deleted_at)}`:''],['删除人',names[t.deleted_by]||t.deleted_by],['关闭时间',t.closed_at?`${shanghaiDate(t.closed_at)} ${clock(t.closed_at)}`:''],['关闭人',t.closed_by],['关闭说明',t.close_reason],['用时',timing(t)],['用时详情',timeDetails(t)],['交付内容',t.deliverable_expectation],['验收标准',t.acceptance_criteria],['优先级',t.priority==='高'?'高优先 · 负责人临时插单':'正常'],['完成说明',t.result_summary],['补充原因',appendReason],['员工自评分',t.employee_ai_points==null?'未填写':t.employee_ai_points+' 点'+(t.employee_ai_reason?' · '+t.employee_ai_reason:'')],['平台 AI 建议',t.platform_ai_points==null?'尚未生成':t.platform_ai_points+' 点 · '+t.platform_ai_reason],['最终得分',t.awarded_points==null?'未打分':t.awarded_points+' 点'],['验收结果',t.acceptance_result],['阻塞原因',t.blocked_reason]];
   const shortLabels=new Set(['所属大任务','负责人','状态','用时','优先级','员工自评分','最终得分']);
   const items=fields.filter(([,v])=>v!==null&&v!==undefined&&v!=='');
   const chips=items.filter(([label])=>shortLabels.has(label)).map(([label,value])=>'<span class="detail-chip"><b>'+label+'</b>'+esc(value)+'</span>').join('');
   const details=items.filter(([label])=>!shortLabels.has(label)).map(([label,value])=>'<div class="detail-field"><dt>'+label+'</dt><dd>'+esc(value)+'</dd></div>').join('');
   const canReview=t.status==='待验收';
   const canEditScore=ownerLoggedIn&&t.status==='已完成';
+  const canRestore=ownerLoggedIn&&t.status==='已删除';
   const content=document.querySelector('#detail-content');
   const canClose=ownerLoggedIn&&['阻塞','需修改'].includes(t.status);
-  content.classList.toggle('has-review',canReview||canClose||canEditScore);
-  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+renderTaskEvidence(t)+'</section>'+(canReview||canClose||canEditScore?'<aside class="detail-side" id="detail-side"></aside>':'');
+  content.classList.toggle('has-review',canReview||canClose||canEditScore||canRestore);
+  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+renderTaskEvidence(t)+'</section>'+(canReview||canClose||canEditScore||canRestore?'<aside class="detail-side" id="detail-side"></aside>':'');
   appendReviewForm(t);
   appendCloseTaskForm(t);
   appendScoreEditForm(t);
+  appendRestoreTaskForm(t);
   document.querySelector('#task-detail').showModal();
   clampDetailFields();
+}
+function appendRestoreTaskForm(t){
+  if(!ownerLoggedIn||t.status!=='已删除')return;
+  const container=document.querySelector('#detail-side');
+  container.insertAdjacentHTML('beforeend','<section class="restore-task-panel"><h3>恢复任务</h3><p class="panel-hint">恢复到删除前的“'+esc(t.deleted_from_status||'原状态')+'”。若删除前正在计时，恢复后会保持暂停，不会自动重新计时。</p><button type="button" class="primary" id="owner-restore-task">确认恢复</button><p id="owner-restore-notice" role="status"></p></section>');
+  document.querySelector('#owner-restore-task').onclick=async event=>{const button=event.currentTarget;if(!confirm(`确认恢复“${t.title}”？`))return;button.disabled=true;try{await ownerApi('action',{action:'owner_restore_task',args:{task_id:t.id}});document.querySelector('#task-detail').close();await loadDashboard();showPage('deleted',true);}catch(error){document.querySelector('#owner-restore-notice').textContent=error.message;button.disabled=false;}};
 }
 function clampDetailFields(){
   document.querySelectorAll('#detail-content .detail-field dd').forEach(dd=>{
@@ -746,6 +770,20 @@ async function reviewGroup(groupId,button){
   catch(error){alert(error.message);button.disabled=false;}
 }
 for(const id of ['kanban','closed-tasks','actions','progress-pending','timeline-people'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+document.querySelectorAll('[data-deleted-filter]').forEach(button=>button.onclick=()=>{deletedFilter=button.dataset.deletedFilter;renderDeletedTasks();});
+document.querySelector('#deleted-tasks').onclick=async event=>{
+  const restore=event.target.closest('[data-restore-task]');
+  if(restore){
+    const task=dashboardDeletedTasks.find(item=>item.id===restore.dataset.restoreTask);
+    if(!task||!confirm(`确认恢复“${task.title}”？`))return;
+    restore.disabled=true;
+    try{await ownerApi('action',{action:'owner_restore_task',args:{task_id:task.id}});await loadDashboard();}
+    catch(error){alert(error.message);restore.disabled=false;}
+    return;
+  }
+  const detail=event.target.closest('[data-task-id]');
+  if(detail)showDetail(detail.dataset.taskId);
+};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#daily-completion-scores').onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 for(const id of ['timeline-date','timeline-kind','timeline-search'])document.getElementById(id).addEventListener('input',renderTimeline);
@@ -850,6 +888,8 @@ function updateOwnerControls(){
   document.querySelector('#owner-login').hidden=ownerLoggedIn;
   document.querySelector('#insert-task').hidden=!ownerLoggedIn;
   document.querySelector('#data-freeze-form').hidden=!ownerLoggedIn;
+  document.querySelector('#nav-deleted').hidden=!ownerLoggedIn;
+  if(!ownerLoggedIn&&location.hash==='#deleted')showPage('overview',true);
   document.querySelector('#owner-identity').textContent=ownerLoggedIn?'管理员：余文浩（已登录）':'余文浩登录后自动启用管理员权限。';
   document.querySelector('#ai-auth-gate').hidden=ownerLoggedIn;
   document.querySelector('#ai-access-note').textContent=ownerLoggedIn?'已登录；AI 每次都会读取所选范围的最新记录。':'登录负责人身份后可开始分析。';
@@ -931,7 +971,7 @@ function readReviewFile(file){return new Promise((resolve,reject)=>{const reader
 function renderReviewFiles(){const target=document.querySelector('#review-file-previews');if(!target)return;target.innerHTML=reviewFiles.map((item,index)=>'<div class="archive-preview"><span aria-hidden="true">▣</span><strong>'+esc(item.file.name||'附件')+'</strong><small>'+formatReviewFileSize(item.file.size)+'</small><button type="button" data-remove-review-file="'+index+'">移除</button></div>').join('');}
 function formatReviewFileSize(size){return size<1024*1024?Math.max(1,Math.round(size/1024))+' KB':(size/1024/1024).toFixed(1)+' MB';}
 function addReviewFiles(files){const status=document.querySelector('#review-file-status');if(reviewFiles.length+files.length>6){status.textContent='每次最多上传 6 个文件。';return;}if(files.some(file=>!file.size||file.size>20*1024*1024)){status.textContent='文件不能为空，且单个不能超过 20 MB。';return;}if([...reviewFiles.map(item=>item.file),...files].reduce((sum,file)=>sum+file.size,0)>40*1024*1024){status.textContent='文件合计不能超过 40 MB。';return;}reviewFiles.push(...files.map(file=>({file})));renderReviewFiles();status.textContent='已选 '+reviewFiles.length+' / 6 个文件';}
-document.querySelector('#owner-login').onsubmit=async e=>{e.preventDefault();const note=document.querySelector('#owner-notice');try{const data=Object.fromEntries(new FormData(e.target));if(data.name.trim()!==names.YWH)throw Error('此处仅供管理员余文浩登录，员工请使用员工工作台。');await enableOwnerSession();note.textContent='已登录，可以冻结历史数据、插单、审核打分和关闭阻塞/需修改任务。';}catch(error){note.textContent=error.message;}};
+document.querySelector('#owner-login').onsubmit=async e=>{e.preventDefault();const note=document.querySelector('#owner-notice');try{const data=Object.fromEntries(new FormData(e.target));if(data.name.trim()!==names.YWH)throw Error('此处仅供管理员余文浩登录，员工请使用员工工作台。');await enableOwnerSession();await loadDashboard();note.textContent='已登录，可以冻结历史数据、插单、审核打分、查看删除区并恢复任务。';}catch(error){note.textContent=error.message;}};
 document.querySelector('#ai-owner-login').onclick=async event=>{
   const button=event.currentTarget,status=document.querySelector('#ai-chat-status');
   button.disabled=true;status.textContent='正在启用负责人会话…';

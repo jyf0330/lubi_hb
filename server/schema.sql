@@ -26,7 +26,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   submitted_at INTEGER,
   completed_at INTEGER,
   first_submitted_at INTEGER,
-  first_submitted_points REAL
+  first_submitted_points REAL,
+  deleted_from_status TEXT,
+  deleted_at INTEGER,
+  deleted_by TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee_planned_date ON tasks (assignee, planned_date);

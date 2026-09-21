@@ -358,7 +358,7 @@ def promote_due_tasks(db: sqlite3.Connection, member: str | None, timestamp: int
 def day_snapshot(db: sqlite3.Connection, member: str, report_date: str, timestamp: int) -> dict[str, object]:
     freeze_start = data_freeze_start_ms(db)
     tasks = [dict(row) for row in db.execute(
-        "SELECT * FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ? ORDER BY created_at",
+        "SELECT * FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ? AND status != '已删除' ORDER BY created_at",
         (member, report_date, freeze_start),
     ).fetchall()]
     for task in tasks:
@@ -370,7 +370,7 @@ def day_snapshot(db: sqlite3.Connection, member: str, report_date: str, timestam
     progress_updates = [dict(row) for row in db.execute(
         """SELECT p.task_id, t.title, p.summary, p.next_step, p.blocker, p.progress_percent, p.created_at
         FROM progress_updates p JOIN tasks t ON t.id = p.task_id
-        WHERE p.assignee = ? AND t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
+        WHERE p.assignee = ? AND t.created_at >= ? AND t.status != '已删除' AND p.created_at >= ? AND p.created_at < ?
         ORDER BY p.created_at""",
         (member, freeze_start, max(day_start_ms(), freeze_start), day_start_ms(1)),
     ).fetchall()]
@@ -428,7 +428,7 @@ TOOLS = [
 for definition in TOOLS:
     if definition['name'] in ('work_pause_task', 'work_report_heartbeat', 'work_checkin_progress'):
         definition['inputSchema']['properties']['task_id'] = {'type':'string', 'format':'uuid'}
-for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。'),('work_withdraw_submission','员工撤回自己尚未被处理的待验收提交，保留计时历史并恢复为暂停中的工作。')]:
+for name, description in [('work_set_high_priority','将自己的负责人临时插单手动设为唯一高优先，旧高优先恢复正常。'),('work_unblock_task','解除自己的阻塞任务，恢复待办。'),('work_withdraw_submission','员工撤回自己尚未被处理的待验收提交，保留计时历史并恢复为暂停中的工作。'),('work_delete_task','员工将自己的任意任务移入删除区；服务端数据完整保留，删除后退出全部统计。'),('owner_restore_task','管理员从删除区恢复任务到删除前状态。')]:
     TOOLS.append({'name':name,'description':description,'inputSchema':{'type':'object','properties':{'task_id':{'type':'string','format':'uuid'}},'required':['task_id'],'additionalProperties':False}})
 
 
@@ -451,7 +451,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             frozen_group = db.execute("SELECT created_at FROM task_groups WHERE id=?", (group_id_arg,)).fetchone()
             if frozen_group and int(frozen_group["created_at"]) < freeze_start:
                 raise ValueError("该大任务早于数据冻结日期，当前视为不存在。")
-        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'owner_set_task_score', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
+        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'owner_set_task_score', 'owner_restore_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission', 'work_delete_task'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
             if attachments:
@@ -565,7 +565,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             tomorrow_tasks = [dict(row) for row in db.execute(
                 """SELECT id, title, type, status, estimated_minutes, planned_points,
                           deliverable_expectation, acceptance_criteria, notes
-                   FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ?
+                   FROM tasks WHERE assignee = ? AND planned_date = ? AND created_at >= ? AND status != '已删除'
                    ORDER BY created_at""",
                 (member, date_string(1), freeze_start),
             ).fetchall()]
@@ -842,7 +842,7 @@ def append_task_group(member, data):
         if not group:
             raise ValueError("找不到属于当前成员的大任务。")
         children = db.execute(
-            "SELECT id, title, status, estimated_minutes, group_order FROM tasks WHERE group_id = ? ORDER BY group_order, created_at",
+            "SELECT id, title, status, estimated_minutes, group_order FROM tasks WHERE group_id = ? AND status != '已删除' ORDER BY group_order, created_at",
             (group_id,),
         ).fetchall()
         payload_hash = hashlib.sha256(
@@ -854,7 +854,7 @@ def append_task_group(member, data):
         ).hexdigest()
         if request_id:
             existing_rows = []
-            for row in db.execute("SELECT estimated_minutes, notes FROM tasks WHERE group_id = ?", (group_id,)).fetchall():
+            for row in db.execute("SELECT estimated_minutes, notes FROM tasks WHERE group_id = ? AND status != '已删除'", (group_id,)).fetchall():
                 try:
                     notes = json.loads(row["notes"] or "{}")
                 except (TypeError, json.JSONDecodeError):
@@ -1001,9 +1001,11 @@ def task_groups(db, member=None):
     for row in rows:
         group = dict(row)
         children = [dict(t) for t in db.execute(
-            "SELECT * FROM tasks WHERE group_id = ? AND created_at >= ? ORDER BY group_order",
+            "SELECT * FROM tasks WHERE group_id = ? AND created_at >= ? AND status != '已删除' ORDER BY group_order",
             (row["id"], freeze_start),
         )]
+        if not children:
+            continue
         task_files.attach_metadata(db, children)
         timestamp = now_ms()
         for child in children:
@@ -1074,7 +1076,7 @@ def enrich_dashboard_tasks(db, tasks, timestamp):
             task["close_reason"] = row["detail"]
 
 
-def dashboard_data() -> dict[str, object]:
+def dashboard_data(include_deleted: bool = False) -> dict[str, object]:
     with DB_LOCK, connect() as db:
         timestamp = now_ms()
         promote_due_tasks(db, None, timestamp)
@@ -1083,19 +1085,30 @@ def dashboard_data() -> dict[str, object]:
         tasks = [dict(row) for row in db.execute(
             """SELECT * FROM tasks
             WHERE created_at >= ?
+              AND status != '已删除'
               AND (planned_date = ? OR status != '已完成' OR (completed_at >= ? AND completed_at < ?))
             ORDER BY updated_at DESC""",
             (freeze_start, today(), max(day_start_ms(-6), freeze_start), day_start_ms(1)),
         ).fetchall()]
         all_tasks = [dict(row) for row in db.execute(
-            "SELECT * FROM tasks WHERE created_at >= ? ORDER BY updated_at DESC",
+            "SELECT * FROM tasks WHERE created_at >= ? AND status != '已删除' ORDER BY updated_at DESC",
             (freeze_start,),
         ).fetchall()]
+        deleted_tasks = []
+        if include_deleted:
+            deleted_tasks = [dict(row) for row in db.execute(
+                """SELECT t.*, g.title AS group_title FROM tasks t
+                   LEFT JOIN task_groups g ON g.id=t.group_id
+                   WHERE t.created_at >= ? AND t.status='已删除'
+                   ORDER BY t.deleted_at DESC, t.updated_at DESC""",
+                (freeze_start,),
+            ).fetchall()]
         enrich_dashboard_tasks(db, tasks, timestamp)
         enrich_dashboard_tasks(db, all_tasks, timestamp)
+        enrich_dashboard_tasks(db, deleted_tasks, timestamp)
         sessions = [dict(row) for row in db.execute(
             """SELECT ws.*, t.title, t.type FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id
-               WHERE t.created_at >= ? AND ws.started_at < ?
+               WHERE t.created_at >= ? AND t.status != '已删除' AND ws.started_at < ?
                  AND (ws.ended_at IS NULL OR ws.ended_at > ?)
                ORDER BY ws.started_at DESC LIMIT 24""",
             (freeze_start, day_start_ms(1), max(day_start_ms(), freeze_start)),
@@ -1106,7 +1119,7 @@ def dashboard_data() -> dict[str, object]:
         progress_updates = [dict(row) for row in db.execute(
             """SELECT p.*, t.title, t.type FROM progress_updates p
             JOIN tasks t ON t.id = p.task_id
-            WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
+            WHERE t.created_at >= ? AND t.status != '已删除' AND p.created_at >= ? AND p.created_at < ?
             ORDER BY p.created_at DESC LIMIT 60""",
             (freeze_start, max(day_start_ms(), freeze_start), day_start_ms(1)),
         ).fetchall()]
@@ -1115,14 +1128,14 @@ def dashboard_data() -> dict[str, object]:
             """SELECT e.id, e.task_id, e.actor, e.event_type, e.from_status,
                       e.to_status, e.detail, e.created_at, t.title, t.assignee, t.type
                FROM task_events e JOIN tasks t ON t.id = e.task_id
-               WHERE t.created_at >= ? AND e.created_at >= ? AND e.created_at < ?
+               WHERE t.created_at >= ? AND t.status != '已删除' AND e.created_at >= ? AND e.created_at < ?
                ORDER BY e.created_at DESC LIMIT 500""",
             (freeze_start, timeline_start, day_start_ms(1)),
         ).fetchall()]
         timeline_sessions = [dict(row) for row in db.execute(
             """SELECT ws.*, t.title, t.type, t.status
                FROM work_sessions ws JOIN tasks t ON t.id = ws.task_id
-               WHERE t.created_at >= ? AND ws.started_at < ?
+               WHERE t.created_at >= ? AND t.status != '已删除' AND ws.started_at < ?
                  AND (ws.ended_at IS NULL OR ws.ended_at > ?)
                ORDER BY ws.started_at DESC LIMIT 500""",
             (freeze_start, day_start_ms(1), timeline_start),
@@ -1134,7 +1147,7 @@ def dashboard_data() -> dict[str, object]:
         timeline_progress = [dict(row) for row in db.execute(
             """SELECT p.*, t.title, t.type FROM progress_updates p
                JOIN tasks t ON t.id = p.task_id
-               WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
+               WHERE t.created_at >= ? AND t.status != '已删除' AND p.created_at >= ? AND p.created_at < ?
                ORDER BY p.created_at DESC LIMIT 300""",
             (freeze_start, timeline_start, day_start_ms(1)),
         ).fetchall()]
@@ -1155,10 +1168,10 @@ def dashboard_data() -> dict[str, object]:
         ).fetchall()]
         tomorrow_tasks = [dict(row) for row in db.execute(
             """SELECT id, assignee, title, type, status, estimated_minutes, planned_points
-               FROM tasks WHERE planned_date = ? AND created_at >= ? ORDER BY assignee, created_at""",
+               FROM tasks WHERE planned_date = ? AND created_at >= ? AND status != '已删除' ORDER BY assignee, created_at""",
             (date_string(1), freeze_start),
         ).fetchall()]
-    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "tasks": tasks, "all_tasks": all_tasks, "deleted_tasks": deleted_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 def analysis_context(period: str) -> dict[str, object]:
@@ -1182,7 +1195,7 @@ def analysis_context(period: str) -> dict[str, object]:
         start_date = max(requested_start_date, freeze_date) if freeze_date else requested_start_date
         all_rows = db.execute(
             """SELECT * FROM tasks
-               WHERE created_at >= ? AND (
+               WHERE created_at >= ? AND status != '已删除' AND (
                     status NOT IN ('已完成', '已关闭')
                     OR (completed_at >= ? AND completed_at < ?)
                     OR (planned_date >= ? AND planned_date <= ?))
@@ -1226,7 +1239,7 @@ def analysis_context(period: str) -> dict[str, object]:
             for row in db.execute(
                 """SELECT p.*, t.title FROM progress_updates p
                    JOIN tasks t ON t.id = p.task_id
-                   WHERE t.created_at >= ? AND p.created_at >= ? AND p.created_at < ?
+                   WHERE t.created_at >= ? AND t.status != '已删除' AND p.created_at >= ? AND p.created_at < ?
                    ORDER BY p.created_at DESC LIMIT 120""",
                 (freeze_start, start_ms, end_ms),
             ).fetchall()
@@ -1249,7 +1262,7 @@ def analysis_context(period: str) -> dict[str, object]:
         for row in db.execute(
             """SELECT ws.assignee, ws.started_at, ws.ended_at FROM work_sessions ws
                JOIN tasks t ON t.id=ws.task_id
-               WHERE t.created_at >= ? AND ws.started_at < ?
+               WHERE t.created_at >= ? AND t.status != '已删除' AND ws.started_at < ?
                  AND (ws.ended_at IS NULL OR ws.ended_at > ?)""",
             (freeze_start, end_ms, start_ms),
         ).fetchall():
@@ -1389,7 +1402,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "owner_set_task_score", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_update_submission", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "owner_set_task_score", "owner_restore_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission", "work_delete_task", "work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_update_submission", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")
@@ -1447,7 +1460,7 @@ class Handler(BaseHTTPRequestHandler):
                 freeze_start = data_freeze_start_ms(db)
                 tasks = [dict(row) for row in db.execute(
                     """SELECT * FROM tasks WHERE assignee = ? AND created_at >= ?
-                       AND status NOT IN ('已完成', '已关闭')
+                       AND status NOT IN ('已完成', '已关闭', '已删除')
                        ORDER BY CASE WHEN priority='高' THEN 0 ELSE 1 END, created_at DESC""",
                     (member, freeze_start),
                 )]
@@ -1455,7 +1468,7 @@ class Handler(BaseHTTPRequestHandler):
                     task["actual_minutes"] = actual_minutes(db, task["id"], now_ms())
                 groups = task_groups(db, member)
                 for group in groups:
-                    group["tasks"] = [task for task in group["tasks"] if task["status"] != "已关闭"]
+                    group["tasks"] = [task for task in group["tasks"] if task["status"] not in ("已关闭", "已删除")]
                 scores = [row for row in workflow.daily_scores(db, today(), minimum_created_at=freeze_start) if row['assignee'] == member]
                 if freeze_date:
                     scores = [row for row in scores if row["date"] >= freeze_date]
@@ -1478,7 +1491,7 @@ class Handler(BaseHTTPRequestHandler):
                 progress = [dict(row) for row in db.execute(
                     """SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at
                        FROM progress_updates p JOIN tasks t ON t.id=p.task_id
-                       WHERE p.assignee=? AND t.assignee=? AND t.created_at>=? AND p.created_at>=?
+                       WHERE p.assignee=? AND t.assignee=? AND t.created_at>=? AND t.status!='已删除' AND p.created_at>=?
                        ORDER BY p.created_at DESC LIMIT 20""",
                     (member, member, freeze_start, freeze_start),
                 )]
@@ -1496,8 +1509,9 @@ class Handler(BaseHTTPRequestHandler):
                 row = db.execute(
                     """SELECT a.body,a.content_type,a.name FROM task_attachments a
                        JOIN tasks t ON t.id=a.task_id
-                       WHERE a.id=? AND t.created_at>=? AND (t.assignee=? OR ?='YWH')""",
-                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), member, member),
+                       WHERE a.id=? AND t.created_at>=? AND (t.assignee=? OR ?='YWH')
+                         AND (t.status!='已删除' OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), member, member, member),
                 ).fetchone()
             if row:
                 safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
@@ -1517,8 +1531,8 @@ class Handler(BaseHTTPRequestHandler):
                     """SELECT i.body,i.content_type,i.name FROM progress_images i
                        JOIN progress_updates p ON p.id=i.progress_id JOIN tasks t ON t.id=p.task_id
                        WHERE i.id=? AND t.created_at>=? AND p.created_at>=?
-                         AND (p.assignee=? OR ?='YWH')""",
-                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member),
+                         AND (p.assignee=? OR ?='YWH') AND (t.status!='已删除' OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member, member),
                 ).fetchone()
             if row:
                 extra_headers = None
@@ -1538,8 +1552,8 @@ class Handler(BaseHTTPRequestHandler):
                     """SELECT a.body,a.content_type,a.name FROM progress_attachments a
                        JOIN progress_updates p ON p.id=a.progress_id JOIN tasks t ON t.id=p.task_id
                        WHERE a.id=? AND t.created_at>=? AND p.created_at>=?
-                         AND (p.assignee=? OR ?='YWH')""",
-                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member),
+                         AND (p.assignee=? OR ?='YWH') AND (t.status!='已删除' OR ?='YWH')""",
+                    (path.rsplit("/", 1)[-1], data_freeze_start_ms(db), data_freeze_start_ms(db), member, member, member),
                 ).fetchone()
             if row:
                 safe_name = row["name"].replace('"', "'").replace("\r", "").replace("\n", "")
@@ -1565,7 +1579,7 @@ class Handler(BaseHTTPRequestHandler):
             key = f"{status['task_id']}:{status['next_due_at']}:{reminder_slot}"
             self.send_bytes(HTTPStatus.OK, key.encode(), "text/plain; charset=utf-8")
         elif path == "/api/dashboard":
-            self.send_json(HTTPStatus.OK, dashboard_data())
+            self.send_json(HTTPStatus.OK, dashboard_data(include_deleted=self.employee_member() == "YWH"))
         elif path in ("/", "/index.html"):
             self.send_bytes(HTTPStatus.OK, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif path == "/app.js":

@@ -21,7 +21,7 @@ def points(value):
 
 def migrate(db):
     columns = {r[1] for r in db.execute('PRAGMA table_info(tasks)')}
-    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT'), ('first_submitted_at', 'INTEGER'), ('first_submitted_points', 'REAL')]:
+    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT'), ('first_submitted_at', 'INTEGER'), ('first_submitted_points', 'REAL'), ('deleted_from_status', 'TEXT'), ('deleted_at', 'INTEGER'), ('deleted_by', 'TEXT')]:
         if name not in columns:
             db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {kind}')
     # Keep the first review-submission date stable through rework/withdrawal.
@@ -80,7 +80,7 @@ def apply(db, member, name, args, stamp, event, today):
         group = db.execute('SELECT * FROM task_groups WHERE id=?', (group_id,)).fetchone()
         if not group:
             raise ValueError('找不到该大任务，请刷新后重试。')
-        children = db.execute('SELECT * FROM tasks WHERE group_id=? ORDER BY group_order, created_at', (group_id,)).fetchall()
+        children = db.execute("SELECT * FROM tasks WHERE group_id=? AND status!='已删除' ORDER BY group_order, created_at", (group_id,)).fetchall()
         if not children:
             raise ValueError('该大任务还没有小任务。')
         pending = [child for child in children if child['status'] == '待验收']
@@ -110,6 +110,46 @@ def apply(db, member, name, args, stamp, event, today):
     if not task:
         raise ValueError('找不到该任务。')
     task_id, status = task['id'], task['status']
+    if name == 'work_delete_task':
+        if member != task['assignee']:
+            raise ValueError('只能删除自己的任务。')
+        if status == '已删除':
+            raise ValueError('任务已经在删除区。')
+        reason = str(args.get('reason') or '').strip()
+        if len(reason) > 500:
+            raise ValueError('删除说明最多 500 字。')
+        db.execute(
+            "UPDATE work_sessions SET ended_at=?, end_reason='员工移入删除区' WHERE task_id=? AND ended_at IS NULL",
+            (stamp, task_id),
+        )
+        changed = db.execute(
+            """UPDATE tasks SET status='已删除', deleted_from_status=?, deleted_at=?,
+                      deleted_by=?, is_paused=0, priority='普通', updated_at=?
+               WHERE id=? AND assignee=? AND status=?""",
+            (status, stamp, member, stamp, task_id, member, status),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务状态已变化，请刷新后重试。')
+        event(db, task_id, member, '员工移入删除区', status, '已删除', reason or '员工删除任务；服务端数据保留', stamp)
+        return {'message': f'已将“{task["title"]}”移入删除区。', 'task_id': task_id, 'status': '已删除'}
+    if name == 'owner_restore_task':
+        if member != 'YWH':
+            raise ValueError('只有管理员可以恢复删除区任务。')
+        if status != '已删除' or not task['deleted_from_status']:
+            raise ValueError('该任务不在删除区。')
+        restored_status = task['deleted_from_status']
+        paused = int(restored_status == '进行中')
+        changed = db.execute(
+            """UPDATE tasks SET status=?, deleted_from_status=NULL, deleted_at=NULL,
+                      deleted_by=NULL, is_paused=?, priority='普通', updated_at=?
+               WHERE id=? AND status='已删除'""",
+            (restored_status, paused, stamp, task_id),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务状态已变化，请刷新后重试。')
+        detail = '恢复后保持暂停，需员工手动继续。' if paused else '管理员从删除区恢复任务。'
+        event(db, task_id, member, '管理员恢复删除任务', '已删除', restored_status, detail, stamp)
+        return {'message': f'已恢复任务：{task["title"]}。', 'task_id': task_id, 'status': restored_status, 'paused': bool(paused)}
     if name == 'owner_close_task':
         if member != 'YWH':
             raise ValueError('只有负责人可以关闭任务。')
@@ -253,7 +293,7 @@ def first_submission_scores(db, report_date, days=5, minimum_created_at=0):
                 """SELECT COALESCE(SUM(first_submitted_points), 0), COUNT(*),
                           SUM(CASE WHEN first_submitted_points IS NULL THEN 1 ELSE 0 END)
                    FROM tasks
-                   WHERE assignee=? AND created_at>=?
+                   WHERE assignee=? AND created_at>=? AND status!='已删除'
                      AND first_submitted_at>=? AND first_submitted_at<?""",
                 (member, minimum_created_at, int(start.timestamp()*1000), int(stop.timestamp()*1000)),
             ).fetchone()
