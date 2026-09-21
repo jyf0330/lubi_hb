@@ -92,10 +92,24 @@ function renderPersonal(data){
   $('#owner-dashboard').hidden=data.member!=='YWH';
   $('#owner-dashboard').href=new URL('../..',apiBase).href;
   $('#personal-summary').innerHTML='<div><small>今日审核得分</small><strong>'+todayPoints+' 点</strong></div><div><small>近 7 天得分</small><strong>'+total+' 点</strong></div><div><small>等待审核</small><strong>'+data.tasks.filter(t=>t.status==='待验收').length+' 项</strong></div><div><small>当前高优先</small><strong>'+esc(high?.title||'暂无')+'</strong></div>';
+  $('#personal-today-score').innerHTML=renderTodayScoreDetails(data.today_score_details||[]);
   $('#personal-scores').innerHTML=scores.slice().reverse().map(r=>'<p>'+esc(r.date)+' · '+r.points+' 点'+(r.unscored_count?' · '+r.unscored_count+' 项尚未打分':'')+'</p>').join('');
   $('#personal-completed').innerHTML=completed.length?completed.map(t=>'<article><h3>'+esc(t.title)+'</h3><p>'+esc(t.awarded_points==null?'尚未打分':t.awarded_points+' 点')+' · '+(t.completed_at?new Date(t.completed_at).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}):'历史任务')+'</p><p>'+esc(t.result_summary||'')+'</p><p>'+esc(t.acceptance_result||'')+'</p>'+taskAttachmentGallery(t.attachments,taskApiRoot)+'</article>').join(''):'<p>还没有审核通过的任务。</p>';
   $('#personal-progress').innerHTML=progress.length?progress.map(p=>'<article><h3>'+esc(p.title)+'</h3><p>'+esc(p.report_status)+' · '+esc(p.summary)+'</p><small>'+reportTimestamp(p.created_at,data.date)+'</small>'+reportImageGallery(p.images,new URL('../',apiBase))+reportFileGallery(p.attachments,new URL('../',apiBase))+'</article>').join(''):'<p>还没有进展记录。</p>';
   renderEmployeeReminders(data.tasks||[]);
+}
+function renderTodayScoreDetails(tasks){
+  if(!tasks.length)return '<p>今天还没有审核通过的任务。</p>';
+  const groups=new Map(),standalone=[];
+  for(const task of tasks){
+    if(!task.group_id){standalone.push(task);continue;}
+    if(!groups.has(task.group_id))groups.set(task.group_id,{title:task.group_title||'未命名大任务',tasks:[]});
+    groups.get(task.group_id).tasks.push(task);
+  }
+  const pointLabel=task=>task.awarded_points==null?'尚未记分':esc(task.awarded_points)+' 点';
+  const list=(items,label)=>'<ul>'+items.map(task=>'<li><span>'+esc(label)+' · '+esc(task.title)+'</span><strong>'+pointLabel(task)+'</strong></li>').join('')+'</ul>';
+  return [...groups.values()].map(group=>'<section class="today-score-group"><h3>大任务 · '+esc(group.title)+'</h3>'+list(group.tasks,'小任务')+'</section>').join('')+
+    (standalone.length?'<section class="today-score-group"><h3>独立任务</h3>'+list(standalone,'任务')+'</section>':'');
 }
 function renderEmployeeReminders(tasks){
   const reminders=[];

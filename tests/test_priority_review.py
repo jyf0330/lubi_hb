@@ -341,3 +341,70 @@ class WorkflowTests(unittest.TestCase):
 
         finally:
             server.shutdown();server.server_close();thread.join()
+
+    def test_employee_today_score_details_list_group_children_once(self):
+        import json, threading
+        from urllib.request import Request, urlopen
+
+        plan = {
+            'group': {
+                'title': '制作角色素材',
+                'deliverable_expectation': '角色素材包',
+                'acceptance_criteria': '素材齐全',
+            },
+            'stated_minutes': 120,
+            'tasks': [
+                {'title': '绘制角色草图', 'type': '美术', 'estimated_minutes': 30,
+                 'deliverable_expectation': '草图', 'acceptance_criteria': '尺寸符合要求'},
+                {'title': '整理角色导出', 'type': '美术', 'estimated_minutes': 30,
+                 'deliverable_expectation': '导出文件', 'acceptance_criteria': '文件可打开'},
+            ],
+        }
+        group_id = app.create_task_group('ZHC', {
+            'request_id': 'today-score-group-details',
+            'source_text': '制作角色素材',
+            'plan': plan,
+        })['group_id']
+        with app.connect() as db:
+            task_ids = [row['id'] for row in db.execute(
+                'SELECT id FROM tasks WHERE group_id=? ORDER BY group_order', (group_id,)
+            )]
+        for task_id, points in zip(task_ids, (2, 3)):
+            self.call('work_start_task', {'task_id': task_id})
+            self.call('work_finish_task', {
+                'task_id': task_id,
+                'summary': '完成小任务',
+                'employee_points': points,
+            })
+        group = self.call('owner_review_group', {'group_id': group_id}, 'YWH')
+        self.assertEqual(group['points'], 5)
+
+        server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f'http://127.0.0.1:{server.server_port}/api/employee/'
+        try:
+            login_request = Request(
+                base + 'login',
+                data=json.dumps({'name': '赵浩丞'}).encode(),
+                headers={'Content-Type': 'application/json', 'X-Team-Request': 'employee'},
+            )
+            with urlopen(login_request) as response:
+                cookie = response.headers.get('Set-Cookie', '').split(';')[0]
+            profile_request = Request(base + 'me', headers={'Cookie': cookie})
+            with urlopen(profile_request) as response:
+                profile = json.load(response)
+
+            today_points = next(
+                row['points'] for row in profile['scores']
+                if row['date'] == profile['date'] and row['assignee'] == 'ZHC'
+            )
+            details = profile['today_score_details']
+            self.assertEqual(today_points, 5)
+            self.assertEqual(len(details), 2)
+            self.assertEqual({row['group_id'] for row in details}, {group_id})
+            self.assertEqual({row['group_title'] for row in details}, {'制作角色素材'})
+            self.assertEqual({row['title'] for row in details}, {'绘制角色草图', '整理角色导出'})
+            self.assertEqual(sum(row['awarded_points'] for row in details), today_points)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()

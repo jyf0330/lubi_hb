@@ -1089,13 +1089,22 @@ class Handler(BaseHTTPRequestHandler):
                 for group in groups:
                     group["tasks"] = [task for task in group["tasks"] if task["status"] != "已关闭"]
                 scores = [row for row in workflow.daily_scores(db, today()) if row['assignee'] == member]
+                today_score_details = [dict(row) for row in db.execute(
+                    """SELECT t.id, t.title, t.group_id, g.title AS group_title,
+                              t.awarded_points, t.completed_at
+                       FROM tasks t LEFT JOIN task_groups g ON g.id = t.group_id
+                       WHERE t.assignee = ? AND t.status = '已完成'
+                         AND t.completed_at >= ? AND t.completed_at < ?
+                       ORDER BY COALESCE(g.created_at, t.created_at), t.group_order, t.created_at""",
+                    (member, day_start_ms(), day_start_ms(1)),
+                )]
                 completed = [dict(row) for row in db.execute("SELECT id,title,status,awarded_points,acceptance_result,result_summary,completed_at FROM tasks WHERE assignee=? AND status='已完成' ORDER BY completed_at DESC LIMIT 30", (member,))]
                 progress = [dict(row) for row in db.execute("SELECT p.id,p.task_id,t.title,p.report_status,p.summary,p.created_at FROM progress_updates p JOIN tasks t ON t.id=p.task_id WHERE p.assignee=? AND t.assignee=? ORDER BY p.created_at DESC LIMIT 20", (member, member))]
                 report_images.attach_metadata(db, progress)
                 report_files.attach_metadata(db, progress)
                 task_files.attach_metadata(db, tasks)
                 task_files.attach_metadata(db, completed)
-            self.send_json(200, {"groups": groups, "name": next(n for n, m in EMPLOYEE_NAMES.items() if m == member), "member": member, "role": member_role(member), "is_admin": member == "YWH", "date": today(), "scores": scores, "completed": completed, "progress": progress, "tasks": tasks, "server_time": now_ms()})
+            self.send_json(200, {"groups": groups, "name": next(n for n, m in EMPLOYEE_NAMES.items() if m == member), "member": member, "role": member_role(member), "is_admin": member == "YWH", "date": today(), "scores": scores, "today_score_details": today_score_details, "completed": completed, "progress": progress, "tasks": tasks, "server_time": now_ms()})
         elif path.startswith("/api/task-files/"):
             member = self.employee_member()
             if not member:
