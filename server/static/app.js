@@ -622,25 +622,7 @@ async function reviewGroup(groupId,button){
 for(const id of ['kanban','closed-tasks','actions','progress-pending'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
-function showScoreDetail(){
-  const tasks=dashboardTasks
-    .filter(t=>t.status==='已完成'&&t.completed_at&&shanghaiDate(t.completed_at)===dashboardDate)
-    .sort((a,b)=>Number(b.completed_at)-Number(a.completed_at));
-  const total=tasks.reduce((sum,t)=>sum+(t.awarded_points==null?0:Number(t.awarded_points)),0);
-  const scored=tasks.filter(t=>t.awarded_points!=null).length;
-  const grouped=['ZHC','YWT','YWH'].map(member=>({
-    member,
-    tasks:tasks.filter(t=>t.assignee===member),
-  })).filter(group=>group.tasks.length);
-  const groups=grouped.map(group=>{
-    const points=group.tasks.reduce((sum,t)=>sum+(t.awarded_points==null?0:Number(t.awarded_points)),0);
-    return `<section class="score-person"><header><h3>${esc(names[group.member]||group.member)}</h3><strong>${group.tasks.length} 项 · ${formatPoints(points)} 点</strong></header><ul>${group.tasks.map(t=>`<li><span><b>${esc(t.title)}</b><small>${clock(t.completed_at)} 审核通过${t.awarded_points==null?' · 尚未记录最终分数':''}</small></span><strong class="score-value">${t.awarded_points==null?'未打分':formatPoints(t.awarded_points)+' 点'}</strong></li>`).join('')}</ul></section>`;
-  }).join('');
-  document.querySelector('#score-detail-content').innerHTML=`<div class="score-summary"><div><small>今日审核任务</small><strong>${tasks.length} 项</strong></div><div><small>已记录分数</small><strong>${scored} / ${tasks.length} 项</strong></div><div><small>今日总得分</small><strong>${formatPoints(total)} 点</strong></div></div>${groups||'<div class="empty">今天还没有审核通过的任务。</div>'}`;
-  document.querySelector('#score-detail').showModal();
-}
-document.querySelector('[data-score-details]').onclick=showScoreDetail;
-document.querySelector('#close-score-detail').onclick=()=>document.querySelector('#score-detail').close();
+document.querySelector('[data-score-details]').onclick=()=>document.querySelector('#score-history-panel').scrollIntoView({behavior:'smooth',block:'center'});
 function showProgressDetail(assignee){
   const items = dashboardProgress.filter((item) => item.assignee === assignee);
   document.querySelector('#progress-detail-title').textContent = `${names[assignee] || assignee} · 今日汇报`;
