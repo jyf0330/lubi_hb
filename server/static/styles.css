@@ -13,7 +13,9 @@
 .timeline-column-heading strong{font-size:14px}
 .timeline-column-heading span:not(.timeline-person-mark){color:var(--muted);font-size:12px}
 .timeline-session-list{display:grid;gap:6px;padding:8px}
-.timeline-session{display:grid;gap:5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fffdf8}
+.timeline-session{display:grid;width:100%;gap:5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fffdf8;text-align:left;transition:background .15s,border-color .15s}
+.timeline-session:hover{background:#f5ead9;border-color:#cdb99f}
+.timeline-session .detail-link{margin:0;font-size:12px}
 .timeline-session-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .timeline-session.active .timeline-session-meta span{color:var(--cyan)}
 .timeline-session.done .timeline-session-meta span{color:var(--green)}
@@ -31,6 +33,11 @@
 #owner-controls form, #review-form { display: grid; gap: 14px; }
 #owner-controls label, #review-form label { display: grid; gap: 6px; font-size: 14px; }
 #owner-controls input, #owner-controls select, #owner-controls textarea, #review-form input, #review-form textarea { font: inherit; padding: 10px; border: 1px solid #aaa; border-radius: 8px; width: 100%; box-sizing: border-box; }
+.score-edit-panel{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.score-edit-panel h3{margin-bottom:6px}
+#score-adjust-form{display:grid;gap:12px;margin-top:12px}
+#score-adjust-form label{display:grid;gap:6px;font-size:14px}
+#score-adjust-form input,#score-adjust-form textarea{font:inherit;padding:10px;border:1px solid #aaa;border-radius:8px;width:100%;box-sizing:border-box}
 .review-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .score-history { overflow-x: auto; }
 .score-history table { width: 100%; border-collapse: collapse; font-size: 14px; }

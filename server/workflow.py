@@ -193,6 +193,25 @@ def apply(db, member, name, args, stamp, event, today):
         db.execute("UPDATE tasks SET status=?,awarded_points=?,completed_at=?,acceptance_result=?,priority=CASE WHEN ?='已完成' THEN '普通' ELSE priority END,rework_count=rework_count+?,updated_at=? WHERE id=?", (target, score, stamp if score is not None else None, reason, target, int(decision=='rework'), stamp, task_id))
         event(db, task_id, member, '审核通过' if decision=='accept' else '退回修改', status, target, json.dumps({'points':score,'reason':reason}, ensure_ascii=False), stamp)
         return {'message': '已审核计分。' if decision=='accept' else '已退回；员工恢复工作后继续累计计时。'}
+    if name == 'owner_set_task_score':
+        if member != 'YWH':
+            raise ValueError('只有负责人可以调整最终得分。')
+        if status != '已完成':
+            raise ValueError('只有已完成的任务可以调整最终得分。')
+        score = points(args.get('points'))
+        reason = str(args.get('reason') or '').strip()
+        if not reason or len(reason) > 1200:
+            raise ValueError('请填写调整原因，最多 1200 字。')
+        previous_score = task['awarded_points']
+        changed = db.execute(
+            "UPDATE tasks SET awarded_points=?,updated_at=? WHERE id=? AND status='已完成'",
+            (score, stamp, task_id),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务状态已变化，请刷新后重试。')
+        event(db, task_id, member, '管理员调整最终得分', status, status,
+              json.dumps({'previous_points': previous_score, 'points': score, 'reason': reason}, ensure_ascii=False), stamp)
+        return {'message': f'最终得分已调整为 {score} 点。', 'previous_points': previous_score, 'points': score}
     raise ValueError('未知工作流操作。')
 
 

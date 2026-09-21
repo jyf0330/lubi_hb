@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
 import app
 import task_planner
+import workflow
 
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
@@ -237,6 +238,42 @@ class WorkflowTests(unittest.TestCase):
         self.call('owner_review_task', {'task_id': override_task, 'decision': 'accept', 'points': 5}, 'YWH')
         self.assertEqual(self.task(override_task)['awarded_points'], 5)
 
+    def test_owner_can_adjust_completed_score_with_reason_and_audit_event(self):
+        task_id = self.insert('已完成任务得分修正')
+        self.submit(task_id, employee_points=6)
+        with self.assertRaisesRegex(ValueError, '只有负责人'):
+            self.call('owner_set_task_score', {'task_id': task_id, 'points': 9, 'reason': '复核'}, 'ZHC')
+        with self.assertRaisesRegex(ValueError, '只有已完成'):
+            self.call('owner_set_task_score', {'task_id': task_id, 'points': 9, 'reason': '复核'}, 'YWH')
+        self.call('owner_review_task', {'task_id': task_id, 'decision': 'accept'}, 'YWH')
+        before = self.task(task_id)
+        for invalid in [True, -1, 3.5, 10001, float('nan'), float('inf'), '3']:
+            with self.assertRaises(ValueError):
+                self.call('owner_set_task_score', {'task_id': task_id, 'points': invalid, 'reason': '修正'}, 'YWH')
+        with self.assertRaisesRegex(ValueError, '调整原因'):
+            self.call('owner_set_task_score', {'task_id': task_id, 'points': 9, 'reason': '  '}, 'YWH')
+
+        self.call('owner_set_task_score', {
+            'task_id': task_id,
+            'points': 9,
+            'reason': '复核交付内容后修正得分',
+        }, 'YWH')
+        after = self.task(task_id)
+        self.assertEqual(after['awarded_points'], 9)
+        self.assertEqual(after['completed_at'], before['completed_at'])
+        with app.connect() as db:
+            events = db.execute(
+                "SELECT actor,from_status,to_status,detail FROM task_events WHERE task_id=? AND event_type='管理员调整最终得分'",
+                (task_id,),
+            ).fetchall()
+            self.assertEqual(len(events), 1)
+            self.assertEqual((events[0]['actor'], events[0]['from_status'], events[0]['to_status']), ('YWH', '已完成', '已完成'))
+            import json
+            detail = json.loads(events[0]['detail'])
+            self.assertEqual(detail, {'previous_points': 6, 'points': 9, 'reason': '复核交付内容后修正得分'})
+            today_score = next(row for row in workflow.daily_scores(db, app.today(), 1) if row['assignee'] == 'ZHC')
+            self.assertEqual(today_score['points'], 9)
+
     def test_employee_self_score_is_required_and_integer(self):
         finish_schema = next(tool for tool in app.TOOLS if tool['name'] == 'work_finish_task')
         self.assertEqual(finish_schema['inputSchema']['properties']['employee_points']['type'], 'integer')
@@ -322,7 +359,9 @@ class WorkflowTests(unittest.TestCase):
             self.assertIsNone(self.task(task_id)['awarded_points'])
             with self.assertRaises(HTTPError):post('action',{'action':'owner_review_task','args':{'task_id':task_id,'decision':'accept','points':5}},worker)
             post('action',{'action':'owner_review_task','args':{'task_id':task_id,'decision':'accept','points':2}},owner)
-            self.assertEqual(self.task(task_id)['awarded_points'],2)
+            with self.assertRaises(HTTPError):post('action',{'action':'owner_set_task_score','args':{'task_id':task_id,'points':7,'reason':'复核'}},worker)
+            post('action',{'action':'owner_set_task_score','args':{'task_id':task_id,'points':4,'reason':'负责人复核交付后修正'}},owner)
+            self.assertEqual(self.task(task_id)['awarded_points'],4)
             def profile(cookie):
                 with urlopen(Request(base+'me?member=YWH',headers={'Cookie':cookie})) as response:
                     return json.load(response)
@@ -331,7 +370,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(worker_data['member'],'ZHC')
             self.assertEqual(worker_data['name'],'赵浩丞')
             self.assertEqual([t['id'] for t in worker_data['completed']],[task_id])
-            self.assertEqual(sum(r['points'] for r in worker_data['scores']),2)
+            self.assertEqual(sum(r['points'] for r in worker_data['scores']),4)
             self.assertTrue(all(r['assignee']=='ZHC' for r in worker_data['scores']))
             self.assertEqual(owner_data['completed'],[])
             self.assertEqual(sum(r['points'] for r in owner_data['scores']),0)

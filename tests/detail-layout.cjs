@@ -12,7 +12,7 @@ assert.match(app, /class="detail-chip"><b>/);
 assert.match(app, /class="detail-fields">/);
 assert.match(app, /class="detail-field"><dt>/);
 assert.match(app, /<aside class="detail-side" id="detail-side">/);
-assert.match(app, /content\.classList\.toggle\('has-review',canReview\|\|canClose\)/);
+assert.match(app, /content\.classList\.toggle\('has-review',canReview\|\|canClose\|\|canEditScore\)/);
 assert.match(app, /function clampDetailFields\(\)/);
 assert.match(app, /classList\.add\('is-clamped'\)/);
 assert.match(app, /'展开全文'/);
@@ -21,7 +21,11 @@ assert.match(
   /querySelector\('#task-detail'\)\.showModal\(\);\s*\n\s*clampDetailFields\(\);/,
 );
 // 待验收任务及负责人可关闭的阻塞/返工任务显示右栏，其他状态单栏满宽。
-assert.match(app, /\(canReview\|\|canClose\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
+assert.match(app, /\(canReview\|\|canClose\|\|canEditScore\?'<aside class="detail-side" id="detail-side"><\/aside>':''\)/);
+assert.match(app, /function appendScoreEditForm\(t\)/);
+assert.match(app, /action:'owner_set_task_score'/);
+assert.match(app, /class="timeline-session \$\{s\.ended_at \? "done" : "active"\}" data-task-id="\$\{esc\(s\.task_id\)\}"/);
+assert.match(app, /'progress-pending','sessions'\]\)document\.getElementById\(id\)\.onclick/);
 // 审核表单必须落在右栏容器内，而不是直接塞进 #detail-content。
 assert.match(
   app,
@@ -33,6 +37,7 @@ assert.match(css, /#task-detail\s*\{[^}]*width:\s*min\(1080px/);
 assert.match(css, /#detail-content\.has-review\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.5fr\)/);
 assert.match(css, /\.detail-fields dd\.is-clamped\s*\{[^}]*line-clamp:\s*3/);
 assert.match(css, /\.detail-expand\s*\{/);
+assert.match(css, /\.timeline-session:hover\s*\{/);
 assert.match(css, /@media \(max-width: 900px\)\s*\{\s*#detail-content\.has-review\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 
 // 静态资源缓存键必须随改动更新，否则浏览器会继续用旧缓存。

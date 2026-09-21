@@ -425,7 +425,7 @@ async function refresh() {
           ? ownSessions
               .map(
                 (s) =>
-                  `<article class="timeline-session ${s.ended_at ? "done" : "active"}"><div class="timeline-session-meta"><time>${clock(s.started_at)}</time><span>${s.ended_at ? "已结束" : "进行中"}</span></div><div class="timeline-task"><span></span><strong>${esc(s.title)} · ${s.ended_at ? `有效工时 ${s.recorded_minutes} 分钟` : `已记录 ${s.recorded_minutes} 分钟`}</strong></div></article>`,
+                  `<button type="button" class="timeline-session ${s.ended_at ? "done" : "active"}" data-task-id="${esc(s.task_id)}"><span class="timeline-session-meta"><time>${clock(s.started_at)}</time><span>${s.ended_at ? "已结束" : "进行中"}</span></span><span class="timeline-task"><span></span><strong>${esc(s.title)} · ${s.ended_at ? `有效工时 ${s.recorded_minutes} 分钟` : `已记录 ${s.recorded_minutes} 分钟`}</strong></span><span class="detail-link">查看任务详情 →</span></button>`,
               )
               .join("")
           : '<div class="empty-timeline">今日暂无计时记录</div>'}</div>
@@ -593,12 +593,14 @@ function showDetail(id){
   const chips=items.filter(([label])=>shortLabels.has(label)).map(([label,value])=>'<span class="detail-chip"><b>'+label+'</b>'+esc(value)+'</span>').join('');
   const details=items.filter(([label])=>!shortLabels.has(label)).map(([label,value])=>'<div class="detail-field"><dt>'+label+'</dt><dd>'+esc(value)+'</dd></div>').join('');
   const canReview=t.status==='待验收';
+  const canEditScore=ownerLoggedIn&&t.status==='已完成';
   const content=document.querySelector('#detail-content');
   const canClose=ownerLoggedIn&&['阻塞','需修改'].includes(t.status);
-  content.classList.toggle('has-review',canReview||canClose);
-  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+taskAttachmentGallery(t.attachments, dashboardApiRoot)+'</section>'+(canReview||canClose?'<aside class="detail-side" id="detail-side"></aside>':'');
+  content.classList.toggle('has-review',canReview||canClose||canEditScore);
+  content.innerHTML='<section class="detail-main"><h3>'+esc(t.title)+'</h3>'+(chips?'<div class="detail-chips">'+chips+'</div>':'')+(details?'<dl class="detail-fields">'+details+'</dl>':'')+taskAttachmentGallery(t.attachments, dashboardApiRoot)+'</section>'+(canReview||canClose||canEditScore?'<aside class="detail-side" id="detail-side"></aside>':'');
   appendReviewForm(t);
   appendCloseTaskForm(t);
+  appendScoreEditForm(t);
   document.querySelector('#task-detail').showModal();
   clampDetailFields();
 }
@@ -621,7 +623,7 @@ async function reviewGroup(groupId,button){
   try{await ownerApi('action',{action:'owner_review_group',args:{group_id:group.id}});await loadDashboard();}
   catch(error){alert(error.message);button.disabled=false;}
 }
-for(const id of ['kanban','closed-tasks','actions','progress-pending'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
+for(const id of ['kanban','closed-tasks','actions','progress-pending','sessions'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#people').onclick=e=>{const card=e.target.closest('[data-person-task-id]');if(card)showDetail(card.dataset.personTaskId);};
 document.querySelector('#daily-completion-scores').onclick=e=>{const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelector('#close-detail').onclick=()=>document.querySelector('#task-detail').close();
@@ -698,6 +700,27 @@ function appendReviewForm(t){
   document.querySelector('#override-score').onclick=()=>{const field=document.querySelector('#override-score-field'),input=form.elements.points;field.hidden=!field.hidden;if(!field.hidden)input.focus();};
   form.onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(form)),decision=e.submitter.value;const note=document.querySelector('#review-notice');const overrideVisible=!document.querySelector('#override-score-field').hidden;if(decision==='accept'&&overrideVisible&&data.points===''){note.textContent='请填写覆盖后的最终分数，可以为 0。';return;}const reason=decision==='rework'&&!data.reason.trim()?DEFAULT_REWORK_REASON:data.reason;form.querySelectorAll('button').forEach(b=>b.disabled=true);try{document.querySelector('#review-file-status').textContent=reviewFiles.length?'正在读取附件，请稍候…':'';const attachments=await Promise.all(reviewFiles.map(item=>readReviewFile(item.file)));const args={task_id:t.id,decision,reason,attachments};if(decision==='accept'&&overrideVisible)args.points=Number(data.points);await ownerApi('action',{action:'owner_review_task',args});reviewFiles=[];document.querySelector('#task-detail').close();await loadDashboard();}catch(error){note.textContent=error.message;}finally{form.querySelectorAll('button').forEach(b=>b.disabled=false);}};
   document.querySelector('#platform-score').onclick=async e=>{const button=e.currentTarget;button.disabled=true;const note=document.querySelector('#review-notice');note.textContent='正在生成建议，不影响你的最终打分…';try{const r=await ownerApi('score',{task_id:t.id});note.textContent='平台 AI 建议：'+r.points+' 点。'+r.reason;await loadDashboard();}catch(error){note.textContent=error.message;}finally{button.disabled=false;}};
+}
+function appendScoreEditForm(t){
+  if(!ownerLoggedIn||t.status!=='已完成')return;
+  const container=document.querySelector('#detail-side');
+  container.insertAdjacentHTML('beforeend','<section class="score-edit-panel"><h3>调整最终得分</h3><p class="panel-hint">当前 '+esc(t.awarded_points==null?'尚未录入':t.awarded_points+' 点')+'。调整会保留完成日期，并写入任务记录。</p><form id="score-adjust-form"><label>最终得分（0–10000 整数）<input name="points" type="number" min="0" max="10000" step="1" required value="'+esc(t.awarded_points==null?'':t.awarded_points)+'"></label><label>调整原因<textarea name="reason" rows="3" maxlength="1200" required placeholder="说明本次分数调整原因"></textarea></label><button class="primary" type="submit">保存得分调整</button><p id="score-adjust-notice" role="status" aria-live="polite"></p></form></section>');
+  const form=document.querySelector('#score-adjust-form');
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const data=Object.fromEntries(new FormData(form));
+    const score=Number(data.points),reason=data.reason.trim();
+    const notice=document.querySelector('#score-adjust-notice');
+    if(!Number.isInteger(score)||score<0||score>10000){notice.textContent='得分必须是 0–10000 的整数。';return;}
+    if(!reason){notice.textContent='请填写调整原因。';return;}
+    const button=form.querySelector('button[type="submit"]');button.disabled=true;
+    try{
+      await ownerApi('action',{action:'owner_set_task_score',args:{task_id:t.id,points:score,reason}});
+      document.querySelector('#task-detail').close();
+      await loadDashboard();
+      showDetail(t.id);
+    }catch(error){notice.textContent=error.message;button.disabled=false;}
+  };
 }
 function appendCloseTaskForm(t){
   if(!ownerLoggedIn||!['阻塞','需修改'].includes(t.status))return;

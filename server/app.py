@@ -381,7 +381,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
     timestamp = now_ms()
     with DB_LOCK, connect() as db:
         promote_due_tasks(db, member, timestamp)
-        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
+        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'owner_set_task_score', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
             result = workflow.apply(db, member, name, args, timestamp, event, today())
             if attachments:
@@ -1028,7 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "owner_set_task_score", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission","work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")
