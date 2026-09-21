@@ -159,7 +159,7 @@ function timelineEventDetail(event) {
       if (event.event_type === "管理员调整最终得分")
         return `${detail.previous_points ?? "未打分"} → ${detail.points} 点 · ${detail.reason || "负责人调整"}`;
       if (detail.points !== undefined)
-        return `${detail.points} 点${detail.reason ? ` · ${detail.reason}` : ""}`;
+        return detail.points == null ? (detail.reason || "未计分") : `${detail.points} 点${detail.reason ? ` · ${detail.reason}` : ""}`;
       if (detail.reason) return detail.reason;
     }
   } catch {}
@@ -201,11 +201,19 @@ function renderTimeline() {
   const progresses = dashboardTimelineProgress.filter((item) => shanghaiDate(item.created_at) === date);
   const rawEvents = dashboardTimelineEvents.filter((item) => shanghaiDate(item.created_at) === date && item.event_type !== "30分钟汇报" && !/计时/.test(item.event_type));
   const events = [
-    ...sessions.map((session) => ({
-      task_id:session.task_id, assignee:session.assignee, title:session.title, type:"work",
-      label:session.ended_at ? "计时记录" : "正在计时", created_at:session.started_at,
-      detail:`${session.ended_at ? `${clock(session.started_at)}–${clock(session.ended_at)}` : `${clock(session.started_at)} 开始`} · 当日有效 ${workingMinutesForDate(session,date)} 分钟${session.end_reason ? ` · ${session.end_reason}` : ""}`,
-    })),
+    ...sessions.map((session) => {
+      const startedToday = shanghaiDate(session.started_at) === date;
+      const endedToday = session.ended_at && shanghaiDate(session.ended_at) === date;
+      const detail = startedToday
+        ? `${clock(session.started_at)}${endedToday ? `–${clock(session.ended_at)}` : " 开始"}`
+        : `跨日计时${endedToday ? ` · ${clock(session.ended_at)} 结束` : ""}`;
+      return {
+        task_id:session.task_id, assignee:session.assignee, title:session.title, type:"work",
+        label:session.ended_at ? "计时记录" : "正在计时", created_at:startedToday ? session.started_at : Date.parse(`${date}T00:00:00+08:00`),
+        time_label:startedToday ? clock(session.started_at) : "跨日",
+        detail:`${detail} · 当日有效 ${workingMinutesForDate(session,date)} 分钟${session.end_reason ? ` · ${session.end_reason}` : ""}`,
+      };
+    }),
     ...progresses.map((item) => ({
       task_id:item.task_id, assignee:item.assignee, title:item.title, type:"progress", label:item.report_status || "HB 进展", created_at:item.created_at,
       detail:`${item.summary || "未填写说明"}${item.progress_percent == null ? "" : ` · ${item.progress_percent}%`}${item.next_step ? ` · 下一步：${item.next_step}` : ""}${item.blocker ? ` · 问题：${item.blocker}` : ""}`,
@@ -226,13 +234,13 @@ function renderTimeline() {
     const score = dashboardScores.find((item) => item.date === date && item.assignee === id) || {};
     const current = date === dashboardDate ? tasks.filter((item) => item.assignee === id && item.status === "进行中" && !item.is_paused).length : 0;
     const ownAttention = timelineAttention(tasks,date,id).length;
-    return `<button type="button" class="timeline-person-summary ${id.toLowerCase()}${assignee===id?' selected':''}" data-timeline-person="${id}" aria-pressed="${assignee===id}"><span class="timeline-person-title"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${date===dashboardDate ? `${current} 项正在计时` : `${date} 记录`}</strong></span></span><span class="timeline-person-metrics"><span><b>${taskCount}</b> 项任务</span><span><b>${minutes}</b> 分钟</span><span><b>${hbCount}</b> 次 HB</span><span><b>${score.completed_count || 0}</b> 项完成</span><span><b>${formatPoints(score.points || 0)}</b> 点</span></span>${ownAttention?`<span class="timeline-person-warning">${ownAttention} 项待关注</span>`:'<span class="timeline-person-ok">当前无待处理异常</span>'}</button>`;
+    return `<button type="button" class="timeline-person-summary ${id.toLowerCase()}${assignee===id?' selected':''}" data-timeline-person="${id}" aria-pressed="${assignee===id}"><span class="timeline-person-title"><span class="avatar">${id}</span><span><small>${esc(names[id])}</small><strong>${date===dashboardDate ? `${current} 项正在计时` : `${date} 记录`}</strong></span></span><span class="timeline-person-metrics"><span><b>${taskCount}</b> 项任务</span><span><b>${minutes}</b> 任务分钟</span><span><b>${hbCount}</b> 次 HB</span><span><b>${score.completed_count || 0}</b> 项完成</span><span><b>${formatPoints(score.points || 0)}</b> 点</span></span>${ownAttention?`<span class="timeline-person-warning">${ownAttention} 项待关注</span>`:'<span class="timeline-person-ok">当前无待处理异常</span>'}</button>`;
   }).join("");
   document.querySelector("#timeline-result-count").textContent = `${date} · ${events.length} 条记录`;
   document.querySelector("#timeline-feed-note").textContent = assignee ? names[assignee] : "全部员工";
   document.querySelector("#sessions").innerHTML = events.length ? events.map((item) => {
     const evidence = (item.images?.length || item.attachments?.length) ? ` · 附件 ${(item.images?.length || 0) + (item.attachments?.length || 0)} 个` : "";
-    return `<button type="button" class="timeline-event kind-${item.type}" data-task-id="${esc(item.task_id)}"><span class="timeline-event-time"><time>${clock(item.created_at)}</time><span>${esc(names[item.assignee] || item.assignee)}</span></span><span class="timeline-event-mark" aria-hidden="true"></span><span class="timeline-event-copy"><span class="timeline-event-label">${esc(item.label)}</span><strong>${esc(item.title)}</strong><span>${esc(item.detail)}${esc(evidence)}</span></span><span class="detail-link">任务详情 →</span></button>`;
+    return `<button type="button" class="timeline-event kind-${item.type}" data-task-id="${esc(item.task_id)}"><span class="timeline-event-time"><time>${esc(item.time_label || clock(item.created_at))}</time><span>${esc(names[item.assignee] || item.assignee)}</span></span><span class="timeline-event-mark" aria-hidden="true"></span><span class="timeline-event-copy"><span class="timeline-event-label">${esc(item.label)}</span><strong>${esc(item.title)}</strong><span>${esc(item.detail)}${esc(evidence)}</span></span><span class="detail-link">任务详情 →</span></button>`;
   }).join("") : '<div class="empty">当前筛选条件下没有工作记录。</div>';
   document.querySelector("#timeline-attention-count").textContent = attention.length;
   document.querySelector("#timeline-attention").innerHTML = date !== dashboardDate
