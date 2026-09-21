@@ -21,9 +21,18 @@ def points(value):
 
 def migrate(db):
     columns = {r[1] for r in db.execute('PRAGMA table_info(tasks)')}
-    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT')]:
+    for name, kind in [('owner_inserted', 'INTEGER NOT NULL DEFAULT 0'), ('awarded_points', 'REAL'), ('employee_ai_points', 'REAL'), ('employee_ai_reason', 'TEXT'), ('platform_ai_points', 'REAL'), ('platform_ai_reason', 'TEXT'), ('first_submitted_at', 'INTEGER')]:
         if name not in columns:
             db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {kind}')
+    # Keep the first review-submission date stable through rework/withdrawal.
+    # Recover existing values from submission history when possible.
+    db.execute(
+        """UPDATE tasks SET first_submitted_at = COALESCE(
+             (SELECT MIN(created_at) FROM task_events
+              WHERE task_id = tasks.id AND event_type = '提交验收'),
+             CASE WHEN status = '待验收' THEN submitted_at END
+           ) WHERE first_submitted_at IS NULL"""
+    )
     # Legacy priorities are not owner-authorized inserts; preserve their history.
     for row in db.execute("SELECT id, status, priority FROM tasks WHERE priority != '普通' AND owner_inserted = 0").fetchall():
         db.execute('INSERT INTO task_events (id,task_id,actor,event_type,from_status,to_status,detail,created_at) VALUES (?,?,?,?,?,?,?,?)',

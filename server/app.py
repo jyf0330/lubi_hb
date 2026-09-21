@@ -624,7 +624,7 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             assessment = time_assessment(task["estimated_minutes"], minutes, task["deadline_at"], timestamp)
             if assessment["effort_status"] != "超出预估":
                 variance_reason = None
-            db.execute("UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?, variance_reason = ?, submitted_at = ?, updated_at = ? WHERE id = ?", (summary, variance_reason, timestamp, timestamp, task_id))
+            db.execute("UPDATE tasks SET status = '待验收', is_paused = 0, result_summary = ?, variance_reason = ?, submitted_at = ?, first_submitted_at = COALESCE(first_submitted_at, ?), updated_at = ? WHERE id = ?", (summary, variance_reason, timestamp, timestamp, timestamp, task_id))
             event(db, task_id, member, "提交验收", "进行中", "待验收", summary, timestamp)
             db.executemany(
                 "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",

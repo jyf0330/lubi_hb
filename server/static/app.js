@@ -59,9 +59,32 @@ function meta(t) {
     return `${t.blocked_reason || "等待解除阻塞"}${t.overdue ? " · 已延期" : ""}`;
   if (t.status === "需修改") return `返工 ${t.rework_count} 次 · ${timing(t)}`;
   if (t.status === "待验收")
-    return `${timing(t)} · ${t.submitted_at ? clock(t.submitted_at) + " 提交" : "等待检查"}`;
+    return `${timing(t)} · ${t.first_submitted_at ? `${shanghaiDate(t.first_submitted_at)} ${clock(t.first_submitted_at)} 首次提交` : t.submitted_at ? `${shanghaiDate(t.submitted_at)} ${clock(t.submitted_at)} 提交` : "等待检查"}`;
   if (t.status === "已完成") return `验收通过 · ${timing(t)}`;
   return `${t.type} · 预计 ${t.estimated_minutes} 分钟${t.overdue ? " · 已延期" : ""}`;
+}
+function renderPendingReviews(tasks) {
+  const pendingByDate = new Map();
+  for (const task of tasks) {
+    const submittedAt = task.first_submitted_at || task.submitted_at;
+    const date = submittedAt ? shanghaiDate(submittedAt) : "日期未知";
+    if (!pendingByDate.has(date)) pendingByDate.set(date, []);
+    pendingByDate.get(date).push(task);
+  }
+  const groups = [...pendingByDate].sort(([a], [b]) =>
+    a === "日期未知" ? 1 : b === "日期未知" ? -1 : b.localeCompare(a),
+  );
+  return groups
+    .map(
+      ([date, dateTasks]) =>
+        `<section class="progress-pending-date"><h4>${esc(date === "日期未知" ? "提交日期未知" : `${date} 首次提交`)} <span>${dateTasks.length} 项</span></h4><div class="progress-pending-date-tasks">${dateTasks
+          .map(
+            (task) =>
+              `<button type="button" class="action progress-pending-task" data-task-id="${esc(task.id)}"><span class="status-badge status-2">待验收</span><strong>${esc(task.title)}</strong><span>${esc(names[task.assignee] || task.assignee)} · ${esc(meta(task))}</span><span class="detail-link">查看详情 →</span></button>`,
+          )
+          .join("")}</div></section>`,
+    )
+    .join("");
 }
 function timeDetails(t) {
   const sessions = Array.isArray(t.time_sessions) ? t.time_sessions : [];
@@ -344,12 +367,7 @@ async function refresh() {
   document.querySelector("#progress-pending-count").textContent =
     `${pendingAcceptance.length} 项`;
   document.querySelector("#progress-pending").innerHTML = pendingAcceptance.length
-    ? pendingAcceptance
-        .map(
-          (task) =>
-            `<button type="button" class="action progress-pending-task" data-task-id="${esc(task.id)}"><span class="status-badge status-2">待验收</span><strong>${esc(task.title)}</strong><span>${esc(names[task.assignee] || task.assignee)} · ${esc(meta(task))}</span><span class="detail-link">查看详情 →</span></button>`,
-        )
-        .join("")
+    ? renderPendingReviews(pendingAcceptance)
     : '<div class="empty">当前没有待验收任务</div>';
   document.querySelector("#progress-people").innerHTML = ["ZHC", "YWT", "YWH"]
     .map((id) => {
