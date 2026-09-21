@@ -15,6 +15,9 @@ let reminderSoundEnabled = false;
 let previousPomodoroPhase = null;
 let pendingReworkKey = null;
 let reviewFiles = [];
+let aiMessages = [];
+let aiPeriod = "today";
+let aiBusy = false;
 const DEFAULT_REWORK_REASON = "时间不符需自述";
 const esc = (v) =>
   String(v ?? "").replace(
@@ -525,7 +528,7 @@ for (const button of document.querySelectorAll("[data-action-status]")) {
     target.focus();
   });
 }
-const pages = ['overview','board','closed','progress','daily','timeline'];
+const pages = ['overview','board','closed','progress','daily','timeline','ai-analysis'];
 function showPage(page, update=false) {
   if (!pages.includes(page)) page='overview';
   for (const key of pages) {
@@ -671,10 +674,58 @@ async function ownerApi(path,data){
   const response=await fetch('api/employee/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Team-Request':'employee'},body:JSON.stringify(data)});
   const result=await response.json();if(!response.ok)throw Error(result.error||'操作失败');return result;
 }
+function appendAiMessage(role,content){
+  const article=document.createElement('article');
+  article.className=`ai-message ${role}`;
+  const label=document.createElement('span');
+  label.textContent=role==='assistant'?'AI 分析助手':'你';
+  const copy=document.createElement('p');
+  copy.textContent=content;
+  article.append(label,copy);
+  const messages=document.querySelector('#ai-messages');
+  messages.append(article);
+  messages.scrollTop=messages.scrollHeight;
+}
+function resetAiChat(){
+  aiMessages=[];
+  aiPeriod='today';
+  document.querySelector('#ai-messages').innerHTML='<article class="ai-message assistant"><span>AI 分析助手</span><p>请选择“分析今日情况”或“分析近一周情况”，也可以直接输入你关心的问题。</p></article>';
+  document.querySelector('#ai-chat-status').textContent='';
+  document.querySelector('#ai-chat-input').value='';
+}
+function setAiBusy(busy){
+  aiBusy=busy;
+  document.querySelectorAll('[data-ai-prompt],#ai-chat-form textarea,#ai-chat-form button,#ai-new-chat').forEach(control=>{
+    control.disabled=busy||!ownerLoggedIn;
+  });
+}
+async function askAi(question,period=aiPeriod){
+  const value=String(question||'').trim();
+  if(!ownerLoggedIn){document.querySelector('#ai-chat-status').textContent='请先在页面下方登录负责人身份。';return;}
+  if(!value)return;
+  aiPeriod=period;
+  aiMessages.push({role:'user',content:value});
+  appendAiMessage('user',value);
+  const status=document.querySelector('#ai-chat-status');
+  status.textContent=`正在读取${period==='week'?'近 7 天':'今日'}看板并分析…`;
+  setAiBusy(true);
+  try{
+    const result=await ownerApi('analysis-chat',{period,messages:aiMessages.slice(-9)});
+    aiMessages.push({role:'assistant',content:result.answer});
+    if(aiMessages.length>8)aiMessages=aiMessages.slice(-8);
+    appendAiMessage('assistant',result.answer);
+    status.textContent=`已依据${period==='week'?'近 7 天':'今日'}最新记录完成分析。`;
+  }catch(error){
+    aiMessages.pop();
+    status.textContent=error.message;
+  }finally{setAiBusy(false);}
+}
 function updateOwnerControls(){
   document.querySelector('#owner-login').hidden=ownerLoggedIn;
   document.querySelector('#insert-task').hidden=!ownerLoggedIn;
   document.querySelector('#owner-identity').textContent=ownerLoggedIn?'管理员：余文浩（已登录）':'余文浩登录后自动启用管理员权限。';
+  document.querySelector('#ai-access-note').textContent=ownerLoggedIn?'已登录；AI 每次都会读取所选范围的最新记录。':'登录负责人身份后可开始分析。';
+  setAiBusy(aiBusy);
 }
 async function restoreOwnerSession(){
   try{
@@ -747,6 +798,20 @@ function renderReviewFiles(){const target=document.querySelector('#review-file-p
 function formatReviewFileSize(size){return size<1024*1024?Math.max(1,Math.round(size/1024))+' KB':(size/1024/1024).toFixed(1)+' MB';}
 function addReviewFiles(files){const status=document.querySelector('#review-file-status');if(reviewFiles.length+files.length>6){status.textContent='每次最多上传 6 个文件。';return;}if(files.some(file=>!file.size||file.size>20*1024*1024)){status.textContent='文件不能为空，且单个不能超过 20 MB。';return;}if([...reviewFiles.map(item=>item.file),...files].reduce((sum,file)=>sum+file.size,0)>40*1024*1024){status.textContent='文件合计不能超过 40 MB。';return;}reviewFiles.push(...files.map(file=>({file})));renderReviewFiles();status.textContent='已选 '+reviewFiles.length+' / 6 个文件';}
 document.querySelector('#owner-login').onsubmit=async e=>{e.preventDefault();const note=document.querySelector('#owner-notice');try{const data=Object.fromEntries(new FormData(e.target));if(data.name.trim()!==names.YWH)throw Error('此处仅供管理员余文浩登录，员工请使用员工工作台。');const r=await ownerApi('login',data);ownerLoggedIn=Boolean(r.is_admin);updateOwnerControls();note.textContent='已登录，可以插单、审核打分和关闭阻塞/需修改任务。';}catch(error){note.textContent=error.message;}};
+document.querySelectorAll('[data-ai-prompt]').forEach(button=>button.onclick=()=>{
+  const period=button.dataset.aiPrompt;
+  resetAiChat();
+  askAi(period==='week'?'请分析近 7 天团队情况，先给总体结论，再说明每个人的产出与负载、主要风险、趋势，以及我下一步最该做的三件事。':'请分析今日团队情况，先给总体结论，再说明每个人当前在做什么、完成与待验收情况、阻塞或返工风险，以及我今天最该介入的事项。',period);
+});
+document.querySelector('#ai-chat-form').onsubmit=event=>{
+  event.preventDefault();
+  const input=document.querySelector('#ai-chat-input');
+  const question=input.value.trim();
+  if(!question)return;
+  input.value='';
+  askAi(question);
+};
+document.querySelector('#ai-new-chat').onclick=resetAiChat;
 document.querySelector('#insert-task').onsubmit=async e=>{e.preventDefault();const form=e.target,button=form.querySelector('button'),note=document.querySelector('#owner-notice');button.disabled=true;try{const args=Object.fromEntries(new FormData(form));args.estimated_minutes=Number(args.estimated_minutes);const result=await ownerApi('action',{action:'owner_insert_task',args});note.textContent=result.message;form.reset();await loadDashboard();}catch(error){note.textContent=error.message;}finally{button.disabled=false;}};
 let loading=false;
 async function loadDashboard(){

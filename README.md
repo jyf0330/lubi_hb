@@ -2,6 +2,8 @@
 
 正式员工与负责人页面使用 `server/app.py`（Python/SQLite）。本轮插单、并行、审核计分规则见 [PRIORITY-REVIEW-POINTS](docs/PRIORITY-REVIEW-POINTS.md)。启动：`python3 server/app.py --port 4312 --database /path/to/tasks.db`。
 
+负责人页面包含只读的“AI 分析”入口：可按最新看板记录分析今日或近 7 天的任务、有效工时、最终得分、进展汇报、阻塞与每日总结，并在同一对话中继续追问。该入口仅允许管理员会话使用，复用服务端 `DEEPSEEK_API_KEY`，不会向浏览器下发密钥，也没有修改任务的工具权限。
+
 下方保留旧 Vinext/D1 原型说明，其每小时换算点数规则不适用于正式审核得分。
 
 ## 部署（腾讯云）

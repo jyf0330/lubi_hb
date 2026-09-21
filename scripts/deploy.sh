@@ -24,6 +24,7 @@ APP_FILES=(
   report_images.py
   task_files.py
   task_planner.py
+  team_analyst.py
   schema.sql
 )
 

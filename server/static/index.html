@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=timeline-task-score-edit-20260921"><link rel="stylesheet" href="report-images.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="露比工作室团队总览：任务、交付与每日进展"><title>露比工作室 · 团队总览</title><link rel="stylesheet" href="styles.css?v=ai-team-analysis-20260921"><link rel="stylesheet" href="report-images.css"></head>
 <body><header class="topbar"><div class="mark">☀</div><div><h1>露比工作室</h1><p>团队管理工作台</p></div><span id="today" class="date"></span><a class="employee-link" href="employee">姓名登录 · 我的信息 ↗</a></header>
 <main><div class="page-heading"><div><span class="eyebrow">掌握进展，及时支持</span><h2>团队工作，一目了然</h2></div><div class="refresh-tools"><span id="sync-status" role="status">正在读取最新记录…</span><button type="button" id="refresh-dashboard">刷新数据</button></div></div>
-<nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-closed" aria-controls="closed" aria-selected="false" tabindex="-1" data-page="closed">关闭任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button></nav><p id="load-error" role="alert" hidden></p>
+<nav class="page-tabs" role="tablist" aria-label="管理工作台"><button type="button" role="tab" id="nav-overview" aria-controls="overview" aria-selected="true" tabindex="0" data-page="overview">今日总览</button><button type="button" role="tab" id="nav-board" aria-controls="board" aria-selected="false" tabindex="-1" data-page="board">全部任务</button><button type="button" role="tab" id="nav-closed" aria-controls="closed" aria-selected="false" tabindex="-1" data-page="closed">关闭任务</button><button type="button" role="tab" id="nav-progress" aria-controls="progress" aria-selected="false" tabindex="-1" data-page="progress">hb 进展</button><button type="button" role="tab" id="nav-daily" aria-controls="daily" aria-selected="false" tabindex="-1" data-page="daily">每日总结</button><button type="button" role="tab" id="nav-timeline" aria-controls="timeline" aria-selected="false" tabindex="-1" data-page="timeline">工作轨迹</button><button type="button" role="tab" id="nav-ai-analysis" aria-controls="ai-analysis" aria-selected="false" tabindex="-1" data-page="ai-analysis">AI 分析</button></nav><p id="load-error" role="alert" hidden></p>
 <div id="overview" role="tabpanel" aria-labelledby="nav-overview"><section class="summary">
         <article class="brief">
           <small>今日概况</small
@@ -115,8 +115,33 @@
           <div id="sessions" class="timeline-columns" aria-label="今日成员工作轨迹"></div>
           <p class="footnote">有效工时只计算周一至周五 09:30–12:00、14:00–18:30；午休、下班和周末自动暂停累计。</p>
         </section>
+<section class="panel ai-analysis" id="ai-analysis" role="tabpanel" aria-labelledby="nav-ai-analysis" hidden>
+  <header>
+    <div><small>负责人决策助手</small><h2>AI 团队分析</h2></div>
+    <button type="button" id="ai-new-chat" class="secondary">新对话</button>
+  </header>
+  <p class="panel-hint">读取看板中的任务、计时、得分、进展汇报和每日总结，只做分析，不会修改任何记录。</p>
+  <div class="ai-analysis-layout">
+    <aside class="ai-scope" aria-label="快捷分析">
+      <h3>从这里开始</h3>
+      <button type="button" data-ai-prompt="today"><strong>分析今日情况</strong><span>完成、负载、阻塞与待验收</span></button>
+      <button type="button" data-ai-prompt="week"><strong>分析近一周情况</strong><span>趋势、产出、风险与改进建议</span></button>
+      <p id="ai-access-note">登录负责人身份后可开始分析。</p>
+    </aside>
+    <div class="ai-conversation">
+      <div id="ai-messages" class="ai-messages" role="log" aria-live="polite" aria-label="AI 分析对话">
+        <article class="ai-message assistant"><span>AI 分析助手</span><p>请选择“分析今日情况”或“分析近一周情况”，也可以直接输入你关心的问题。</p></article>
+      </div>
+      <form id="ai-chat-form" class="ai-chat-form">
+        <label for="ai-chat-input">继续追问</label>
+        <div><textarea id="ai-chat-input" maxlength="2000" rows="3" placeholder="例如：谁最需要我今天介入？" required></textarea><button type="submit" class="primary">发送</button></div>
+        <p id="ai-chat-status" role="status"></p>
+      </form>
+    </div>
+  </div>
+</section>
 <section class="panel" id="owner-controls"><h2>管理员操作</h2><p id="owner-identity">余文浩登录后自动启用管理员权限。</p><form id="owner-login"><label>姓名<input name="name" required autocomplete="name" maxlength="20"></label><button>登录管理员</button></form><form id="insert-task" hidden><h3>临时插单</h3><label>员工<select name="assignee"><option value="ZHC">赵浩丞</option><option value="YWT">余文滔</option><option value="YWH">余文浩</option></select></label><label>任务名称<input name="title" required maxlength="120"></label><label>预期分钟（通常不超过 120）<input name="estimated_minutes" type="number" min="1" max="1440" value="120" required></label><label>验收要求<textarea name="acceptance_criteria" required maxlength="800"></textarea></label><button>插入任务，等待员工标高</button></form><p id="owner-notice" role="status"></p></section>
 <section class="panel" id="score-history-panel"><header><div><small>按审核通过日期统计</small><h2>每日完成任务与最终得分</h2></div><span>近 7 天</span></header><p class="panel-hint score-explanation">每位员工每天完成了哪些任务、每项最终得到多少分都在下面。大任务只是小任务的汇总，不会额外叠加一遍分数。</p><div id="daily-completion-scores" class="daily-completion-scores"></div><details class="first-submission-history"><summary>查看员工首次提交自评分 · 近 5 个工作日</summary><p>这份辅助记录按首次提交待验收的日期统计；退回后重提和管理员覆盖最终分数都不会改写它。</p><div id="score-history" class="score-history"></div></details></section>
 <dialog id="task-detail"><div class="detail-heading"><h2>任务详情</h2><button id="close-detail" type="button">关闭</button></div><div id="detail-content"></div></dialog>
 <dialog id="progress-detail"><div class="detail-heading"><h2 id="progress-detail-title">汇报详情</h2><button id="close-progress-detail" type="button">关闭</button></div><div id="progress-detail-content"></div></dialog>
-</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=timeline-task-score-edit-20260921" defer></script></body></html>
+</main><footer>每 30 秒自动更新 · 有效工时按周一至周五上班时段计算</footer><script src="report-images.js?v=report-timestamp-20260919" defer></script><script src="app.js?v=ai-team-analysis-20260921" defer></script></body></html>

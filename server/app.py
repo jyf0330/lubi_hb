@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
 from mcp_protocol import handle_post
 from task_planner import generate_score, generate_plan, validate_plan, text as plan_text
+from team_analyst import generate_analysis
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -951,6 +952,131 @@ def dashboard_data() -> dict[str, object]:
     return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "tasks": tasks, "all_tasks": all_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
+def analysis_context(period: str) -> dict[str, object]:
+    """Build a bounded, read-only management snapshot for the AI analyst."""
+    if period not in ("today", "week"):
+        raise ValueError("分析范围只能选择今日或近 7 天。")
+    days = 1 if period == "today" else 7
+    start_offset = 0 if period == "today" else -6
+    start_ms = day_start_ms(start_offset)
+    end_ms = day_start_ms(1)
+    start_date = date_string(start_offset)
+    end_date = today()
+    timestamp = now_ms()
+    member_names = {code: name for name, code in EMPLOYEE_NAMES.items()}
+
+    with DB_LOCK, connect() as db:
+        promote_due_tasks(db, None, timestamp)
+        all_rows = db.execute(
+            """SELECT * FROM tasks
+               WHERE status NOT IN ('已完成', '已关闭')
+                  OR (completed_at >= ? AND completed_at < ?)
+                  OR (planned_date >= ? AND planned_date <= ?)
+               ORDER BY updated_at DESC""",
+            (start_ms, end_ms, start_date, end_date),
+        ).fetchall()
+        tasks = []
+        for row in all_rows[:120]:
+            task = dict(row)
+            tasks.append(
+                {
+                    "id": task["id"],
+                    "成员": member_names.get(task["assignee"], task["assignee"]),
+                    "任务": task["title"],
+                    "类型": task["type"],
+                    "状态": "已暂停" if task["status"] == "进行中" and task["is_paused"] else task["status"],
+                    "优先级": task["priority"],
+                    "计划日期": task["planned_date"],
+                    "预计分钟": task["estimated_minutes"],
+                    "累计实际分钟": actual_minutes(db, task["id"], timestamp),
+                    "阻塞原因": (task["blocked_reason"] or "")[:500],
+                    "完成说明": (task["result_summary"] or "")[:600],
+                    "验收结果": (task["acceptance_result"] or "")[:500],
+                    "返工次数": task["rework_count"],
+                    "最终得分": task.get("awarded_points"),
+                    "完成时间": task["completed_at"],
+                }
+            )
+
+        progress = [
+            {
+                "成员": member_names.get(row["assignee"], row["assignee"]),
+                "任务": row["title"],
+                "汇报状态": row["report_status"],
+                "进展": (row["summary"] or "")[:500],
+                "下一步": (row["next_step"] or "")[:400],
+                "问题": (row["blocker"] or "")[:400],
+                "进度百分比": row["progress_percent"],
+                "时间": row["created_at"],
+            }
+            for row in db.execute(
+                """SELECT p.*, t.title FROM progress_updates p
+                   JOIN tasks t ON t.id = p.task_id
+                   WHERE p.created_at >= ? AND p.created_at < ?
+                   ORDER BY p.created_at DESC LIMIT 120""",
+                (start_ms, end_ms),
+            ).fetchall()
+        ]
+        reports = [
+            {
+                "日期": row["report_date"],
+                "成员": member_names.get(row["assignee"], row["assignee"]),
+                "总结": (row["summary"] or "")[:1200],
+            }
+            for row in db.execute(
+                """SELECT assignee, report_date, summary FROM daily_reports
+                   WHERE report_date >= ? AND report_date <= ?
+                   ORDER BY report_date DESC, assignee""",
+                (start_date, end_date),
+            ).fetchall()
+        ]
+        period_minutes = {member: 0 for member in MEMBERS}
+        for row in db.execute(
+            """SELECT assignee, started_at, ended_at FROM work_sessions
+               WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)""",
+            (end_ms, start_ms),
+        ).fetchall():
+            clipped_start = max(int(row["started_at"]), start_ms)
+            clipped_end = min(int(row["ended_at"] or timestamp), end_ms)
+            period_minutes[row["assignee"]] += working_minutes_between(clipped_start, clipped_end)
+        scores = workflow.daily_scores(db, today(), days)
+
+    status_order = ("今日待办", "进行中", "已暂停", "待验收", "需修改", "阻塞", "已完成", "已关闭")
+    people = []
+    for member in MEMBERS:
+        own_rows = [row for row in all_rows if row["assignee"] == member]
+        own_statuses = ["已暂停" if row["status"] == "进行中" and row["is_paused"] else row["status"] for row in own_rows]
+        own_scores = [row for row in scores if row["assignee"] == member]
+        people.append(
+            {
+                "成员": member_names[member],
+                "当前及范围内任务状态": {status: own_statuses.count(status) for status in status_order},
+                "范围内完成任务数": sum(int(row["completed_count"]) for row in own_scores),
+                "范围内最终得分": round(sum(float(row["points"]) for row in own_scores), 2),
+                "范围内有效工时分钟": period_minutes[member],
+                "范围内进展汇报数": sum(item["成员"] == member_names[member] for item in progress),
+            }
+        )
+
+    return {
+        "分析范围": "今日" if period == "today" else "近 7 天",
+        "开始日期": start_date,
+        "结束日期": end_date,
+        "生成时间戳": timestamp,
+        "统计说明": [
+            "最终得分按审核通过日期统计，大任务不重复计分。",
+            "范围内有效工时按工作时段内的计时会话裁剪统计。",
+            "任务累计实际分钟是该任务全部历史计时，不等同于范围内工时。",
+            "当前未完成任务会纳入，以便识别风险；已完成任务只纳入所选范围。",
+        ],
+        "人员汇总": people,
+        "任务明细": tasks,
+        "任务明细是否截断": len(all_rows) > len(tasks),
+        "进展汇报": progress,
+        "每日总结": reports,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "GameTeamBoard/1.0"
 
@@ -1009,6 +1135,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/employee/append-plan":
                 self.send_json(200, append_task_group(member, data))
+                return
+            if path == "/api/employee/analysis-chat":
+                if member != "YWH":
+                    raise ValueError("只有负责人可以使用团队 AI 分析。")
+                period = str(data.get("period", ""))
+                answer = generate_analysis(analysis_context(period), data.get("messages"), member)
+                self.send_json(200, {"answer": answer, "period": period, "generated_at": now_ms()})
                 return
             if path == '/api/employee/score':
                 if member != 'YWH':
@@ -1182,7 +1315,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path in ("/api/employee/login", "/api/employee/logout", "/api/employee/action", "/api/employee/plan", "/api/employee/create-plan", "/api/employee/append-plan", "/api/employee/score", "/api/employee/heartbeat"):
+        if urlparse(self.path).path in ("/api/employee/login", "/api/employee/logout", "/api/employee/action", "/api/employee/plan", "/api/employee/create-plan", "/api/employee/append-plan", "/api/employee/score", "/api/employee/analysis-chat", "/api/employee/heartbeat"):
             self.employee_post(urlparse(self.path).path)
             return
         if urlparse(self.path).path != "/api/work-mcp":
