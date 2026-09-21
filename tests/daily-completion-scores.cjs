@@ -21,6 +21,7 @@ const renderScoreHistory = vm.runInNewContext(
     formatPoints: (value) => String(Number(value)),
     shanghaiDate: () => "2026-09-21",
     clock: () => "16:30",
+    taskLifecycleMeta: (task) => `开始工作时间：${task.started_label || "未开始"} · 首次提交时间：${task.submitted_label || "未提交"}`,
   },
 );
 
@@ -31,8 +32,8 @@ renderScoreHistory(
     { date: "2026-09-21", assignee: "YWH", points: 0, completed_count: 0, unscored_count: 0 },
   ],
   [
-    { id: "a", title: "草图", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 2, completed_at: 1 },
-    { id: "b", title: "导出", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 3, completed_at: 2 },
+    { id: "a", title: "草图", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 2, completed_at: 1, started_label: "09:30", submitted_label: "10:20" },
+    { id: "b", title: "导出", assignee: "ZHC", status: "已完成", group_title: "角色制作", awarded_points: 3, completed_at: 2, started_label: "10:30", submitted_label: "11:10" },
   ],
   [{ date: "2026-09-21", assignee: "ZHC", points: 7, unscored_count: 0 }],
   "2026-09-21",
@@ -46,6 +47,9 @@ assert.match(daily, /草图/);
 assert.match(daily, /2 点/);
 assert.match(daily, /导出/);
 assert.match(daily, /3 点/);
+assert.match(daily, /开始工作时间：09:30 · 首次提交时间：10:20/);
+assert.match(daily, /开始工作时间：10:30 · 首次提交时间：11:10/);
+assert.doesNotMatch(daily, /16:30 审核通过/);
 assert.doesNotMatch(daily, /角色制作<\/b>.*5 点/);
 assert.match(daily, /大任务只负责归类与汇总，不单独计分/);
 assert.match(containers["#score-history"].innerHTML, /7 点/);
