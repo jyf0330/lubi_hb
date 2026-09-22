@@ -10,6 +10,7 @@ let dashboardTimelineProgress = [];
 let dashboardServerTime = 0;
 let dashboardDate = "";
 let dashboardFreezeDate = "";
+let dashboardBulkReview = {};
 let dashboardApiRoot = null;
 let ownerLoggedIn = false;
 const statuses = ["今日待办", "进行中", "待验收", "需修改", "已完成", "阻塞", "已关闭"];
@@ -444,6 +445,7 @@ async function refresh() {
   dashboardFirstSubmissionScores = data.first_submission_scores || [];
   dashboardDate = data.date;
   dashboardFreezeDate = data.freeze_date || "";
+  dashboardBulkReview = data.bulk_review || {};
   dashboardServerTime = Number(data.server_time || Date.now());
   dashboardTimelineEvents = data.timeline_events || [];
   dashboardTimelineSessions = data.timeline_sessions || data.sessions || [];
@@ -491,6 +493,7 @@ async function refresh() {
     `${active} 人正在执行任务，${blocked.length ? `${blocked.length} 项阻塞` : "当前无阻塞"}`;
   document.querySelector("#brief-copy").textContent =
     `${tasks.filter(t=>t.priority==='高').length} 项高优先临时插单，${waiting.length} 项等待你审核打分。员工可自行暂停或并行。`;
+  renderBulkReview();
   document.querySelector("#people").innerHTML = [...people].sort((a,b)=>Number(Boolean(b.session))-Number(Boolean(a.session)))
     .map((p) => {
       const recent = dashboardScores.filter(r=>r.assignee===p.id).reduce((n,r)=>n+r.points,0),
@@ -772,6 +775,28 @@ async function reviewGroup(groupId,button){
   try{await ownerApi('action',{action:'owner_review_group',args:{group_id:group.id}});await loadDashboard();}
   catch(error){alert(error.message);button.disabled=false;}
 }
+function renderBulkReview(){
+  const target=document.querySelector('#bulk-review');
+  const eligible=Number(dashboardBulkReview.eligible_count||0);
+  const pending=Number(dashboardBulkReview.pending_count||0);
+  const skipped=Number(dashboardBulkReview.skipped_count||0);
+  const points=formatPoints(dashboardBulkReview.eligible_points||0);
+  const ranToday=dashboardBulkReview.last_auto_review_date===dashboardDate;
+  const schedule=ranToday?'今日 23:30 自动验收已执行':'每天 23:30 自动验收仍未处理的合格任务';
+  const skippedCopy=skipped?` · ${skipped} 项因大任务未全部提交或缺少自评分而保留`:'';
+  target.innerHTML=`<div class="bulk-review-copy"><strong>${eligible?`${eligible} 项可一键验收 · ${points} 点`:pending?'当前没有可批量通过的任务':'当前没有待验收任务'}</strong><span>${schedule}${skippedCopy}</span></div>${ownerLoggedIn&&eligible?`<button type="button" id="review-all" class="primary">一键验收全部（${eligible} 项）</button>`:''}<span class="bulk-review-note">自动与手动验收都采用员工自评分，并保留完整审核记录。</span>`;
+  const button=document.querySelector('#review-all');
+  if(button)button.onclick=reviewAll;
+}
+async function reviewAll(event){
+  const button=event.currentTarget;
+  const count=Number(dashboardBulkReview.eligible_count||0);
+  const points=formatPoints(dashboardBulkReview.eligible_points||0);
+  if(!confirm(`确认一键验收当前 ${count} 项任务？\n将采用员工自评分，合计 ${points} 点；不符合条件的任务会继续保留。`))return;
+  button.disabled=true;button.textContent='正在验收…';
+  try{const result=await ownerApi('action',{action:'owner_review_all',args:{}});alert(result.message);await loadDashboard();}
+  catch(error){alert(error.message);button.disabled=false;button.textContent=`一键验收全部（${count} 项）`;}
+}
 for(const id of ['kanban','closed-tasks','actions','progress-pending','timeline-people'])document.getElementById(id).onclick=e=>{const review=e.target.closest('[data-group-review]');if(review){reviewGroup(review.dataset.groupReview,review);return;}const button=e.target.closest('[data-task-id]');if(button)showDetail(button.dataset.taskId);};
 document.querySelectorAll('[data-deleted-filter]').forEach(button=>button.onclick=()=>{deletedFilter=button.dataset.deletedFilter;renderDeletedTasks();});
 document.querySelector('#deleted-tasks').onclick=async event=>{
@@ -896,6 +921,7 @@ function updateOwnerControls(){
   document.querySelector('#owner-identity').textContent=ownerLoggedIn?'管理员：余文浩（已登录）':'余文浩登录后自动启用管理员权限。';
   document.querySelector('#ai-auth-gate').hidden=ownerLoggedIn;
   document.querySelector('#ai-access-note').textContent=ownerLoggedIn?'已登录；AI 每次都会读取所选范围的最新记录。':'登录负责人身份后可开始分析。';
+  if(document.querySelector('#bulk-review'))renderBulkReview();
   setAiBusy(aiBusy);
 }
 async function enableOwnerSession(){

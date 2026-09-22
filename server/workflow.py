@@ -52,7 +52,113 @@ def migrate(db):
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_one_high_per_member ON tasks(assignee) WHERE priority='高'")
 
 
-def apply(db, member, name, args, stamp, event, today):
+def pending_review_batch(db, minimum_created_at=0):
+    """Summarize tasks that can be safely accepted in one batch.
+
+    Standalone tasks are eligible as soon as they have an employee score. A
+    task-group is kept atomic: its pending children only become eligible after
+    every other live child is either pending review or already terminal, and
+    every pending child has a score.
+    """
+    rows = db.execute(
+        """SELECT * FROM tasks
+           WHERE created_at>=? AND status!='已删除'
+           ORDER BY group_id, group_order, created_at""",
+        (minimum_created_at,),
+    ).fetchall()
+    pending = [row for row in rows if row['status'] == '待验收']
+    grouped = {}
+    for row in rows:
+        if row['group_id']:
+            grouped.setdefault(row['group_id'], []).append(row)
+
+    eligible = []
+    eligible_group_ids = set()
+    missing_score_count = 0
+    invalid_score_count = 0
+    incomplete_group_count = 0
+    for row in pending:
+        if not row['group_id']:
+            if row['employee_ai_points'] is None:
+                missing_score_count += 1
+            else:
+                try:
+                    points(row['employee_ai_points'])
+                except ValueError:
+                    invalid_score_count += 1
+                else:
+                    eligible.append(row)
+            continue
+        group_rows = grouped[row['group_id']]
+        group_pending = [child for child in group_rows if child['status'] == '待验收']
+        group_ready = all(child['status'] in ('待验收', '已完成', '已关闭') for child in group_rows)
+        missing_scores = [child for child in group_pending if child['employee_ai_points'] is None]
+        invalid_scores = []
+        for child in group_pending:
+            if child['employee_ai_points'] is None:
+                continue
+            try:
+                points(child['employee_ai_points'])
+            except ValueError:
+                invalid_scores.append(child)
+        scores_ready = not missing_scores and not invalid_scores
+        if group_ready and scores_ready:
+            eligible.append(row)
+            eligible_group_ids.add(row['group_id'])
+        elif missing_scores or invalid_scores:
+            if row['employee_ai_points'] is None:
+                missing_score_count += 1
+            elif row in invalid_scores:
+                invalid_score_count += 1
+            else:
+                incomplete_group_count += 1
+        else:
+            incomplete_group_count += 1
+
+    total_points = sum(points(row['employee_ai_points']) for row in eligible)
+    return {
+        'eligible': eligible,
+        'eligible_count': len(eligible),
+        'eligible_points': total_points,
+        'eligible_group_count': len(eligible_group_ids),
+        'pending_count': len(pending),
+        'skipped_count': len(pending) - len(eligible),
+        'missing_score_count': missing_score_count,
+        'invalid_score_count': invalid_score_count,
+        'incomplete_group_count': incomplete_group_count,
+    }
+
+
+def accept_pending_batch(db, actor, stamp, event, minimum_created_at=0, automatic=False):
+    batch = pending_review_batch(db, minimum_created_at)
+    reason = '23:30 自动一键验收' if automatic else '负责人一键验收'
+    accepted = 0
+    total = 0
+    for task in batch['eligible']:
+        score = points(task['employee_ai_points'])
+        changed = db.execute(
+            """UPDATE tasks SET status='已完成',awarded_points=?,completed_at=?,
+                      acceptance_result=?,priority='普通',updated_at=?
+               WHERE id=? AND status='待验收'""",
+            (score, stamp, reason, stamp, task['id']),
+        ).rowcount
+        if changed != 1:
+            raise ValueError('任务已变化，请刷新后重试。')
+        detail = {
+            'points': score,
+            'reason': reason,
+            'batch_review': True,
+            'automatic': automatic,
+        }
+        event(db, task['id'], actor, '审核通过', '待验收', '已完成', json.dumps(detail, ensure_ascii=False), stamp)
+        accepted += 1
+        total += score
+    batch.pop('eligible')
+    batch.update(accepted_count=accepted, points=total, reason=reason)
+    return batch
+
+
+def apply(db, member, name, args, stamp, event, today, minimum_created_at=0):
     if name == 'owner_insert_task':
         if member != 'YWH':
             raise ValueError('只有负责人可以插入临时任务。')
@@ -106,6 +212,16 @@ def apply(db, member, name, args, stamp, event, today):
                 raise ValueError('任务已变化，请刷新后重试。')
             event(db, child['id'], member, '审核通过', '待验收', '已完成', json.dumps({'points': score, 'reason': acceptance, 'group_review': group['title']}, ensure_ascii=False), stamp)
         return {'message': f'已一次验收“{group["title"]}”的 {len(children)} 个小任务，合计 {total} 点。', 'group_id': group_id, 'points': total, 'accepted_count': len(children)}
+    if name == 'owner_review_all':
+        if member != 'YWH':
+            raise ValueError('只有负责人可以一键验收。')
+        result = accept_pending_batch(db, member, stamp, event, minimum_created_at)
+        if not result['accepted_count']:
+            raise ValueError('当前没有可一键验收的任务；未完成的大任务或缺少自评分的任务会继续保留。')
+        result['message'] = f'已一键验收 {result["accepted_count"]} 项任务，合计 {result["points"]} 点。'
+        if result['skipped_count']:
+            result['message'] += f' 另有 {result["skipped_count"]} 项暂不符合条件，已保留待验收。'
+        return result
     task = db.execute('SELECT * FROM tasks WHERE id=?', (str(args.get('task_id', '')),)).fetchone()
     if not task:
         raise ValueError('找不到该任务。')

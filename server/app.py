@@ -39,6 +39,9 @@ HEARTBEAT_STATUSES = ("正常推进", "已完成阶段", "遇到问题", "计划
 CHECKIN_INTERVAL_MS = 30 * 60 * 1000
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 WORK_WINDOWS = ((9 * 60 + 30, 12 * 60), (14 * 60, 18 * 60 + 30))
+AUTO_REVIEW_HOUR = 23
+AUTO_REVIEW_MINUTE = 30
+AUTO_REVIEW_SETTING = "auto_review_last_date"
 
 
 def now_ms() -> int:
@@ -248,6 +251,63 @@ def initialize_database() -> None:
             raise RuntimeError("数据库成员迁移后存在外键错误。")
 
 
+def run_scheduled_auto_review(timestamp: int | None = None) -> dict[str, object]:
+    """Run the Shanghai 23:30 review once for the current calendar day."""
+    stamp = now_ms() if timestamp is None else int(timestamp)
+    current = datetime.fromtimestamp(stamp / 1000, SHANGHAI)
+    if (current.hour, current.minute) < (AUTO_REVIEW_HOUR, AUTO_REVIEW_MINUTE):
+        return {"ran": False, "reason": "before_cutoff", "date": current.strftime("%Y-%m-%d")}
+    run_date = current.strftime("%Y-%m-%d")
+    with DB_LOCK, connect() as db:
+        previous = db.execute(
+            "SELECT value FROM board_settings WHERE key=?", (AUTO_REVIEW_SETTING,)
+        ).fetchone()
+        if previous and previous[0] == run_date:
+            return {"ran": False, "reason": "already_ran", "date": run_date}
+        result = workflow.accept_pending_batch(
+            db,
+            "系统（23:30自动）",
+            stamp,
+            event,
+            data_freeze_start_ms(db),
+            automatic=True,
+        )
+        db.execute(
+            """INSERT INTO board_settings(key,value,updated_at,updated_by)
+               VALUES (?,?,?,'系统（23:30自动）')
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                 updated_at=excluded.updated_at,updated_by=excluded.updated_by""",
+            (AUTO_REVIEW_SETTING, run_date, stamp),
+        )
+    result.update(ran=True, date=run_date)
+    return result
+
+
+def auto_review_scheduler(stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            result = run_scheduled_auto_review()
+            if result.get("ran") and result.get("accepted_count"):
+                print(
+                    f"23:30 自动验收完成：{result['accepted_count']} 项，{result['points']} 点",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(f"23:30 自动验收失败，将在 60 秒后重试：{exc}", flush=True)
+            stop_event.wait(60)
+            continue
+        current = datetime.now(SHANGHAI)
+        target = current.replace(
+            hour=AUTO_REVIEW_HOUR,
+            minute=AUTO_REVIEW_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+        if current >= target:
+            target += timedelta(days=1)
+        stop_event.wait(max(1, (target - current).total_seconds()))
+
+
 def actor_for(header: str | None) -> str | None:
     if not header or not header.startswith("Bearer "):
         return None
@@ -451,9 +511,9 @@ def call_tool(member: str, name: str, args: dict[str, object]) -> dict[str, obje
             frozen_group = db.execute("SELECT created_at FROM task_groups WHERE id=?", (group_id_arg,)).fetchone()
             if frozen_group and int(frozen_group["created_at"]) < freeze_start:
                 raise ValueError("该大任务早于数据冻结日期，当前视为不存在。")
-        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_close_task', 'owner_set_task_score', 'owner_restore_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission', 'work_delete_task'):
+        if name in ('owner_insert_task', 'owner_review_task', 'owner_review_group', 'owner_review_all', 'owner_close_task', 'owner_set_task_score', 'owner_restore_task', 'work_set_high_priority', 'work_unblock_task', 'work_withdraw_submission', 'work_delete_task'):
             attachments = task_files.decode_files(args.get("attachments", [])) if name == "owner_review_task" else []
-            result = workflow.apply(db, member, name, args, timestamp, event, today())
+            result = workflow.apply(db, member, name, args, timestamp, event, today(), freeze_start)
             if attachments:
                 db.executemany(
                     "INSERT INTO task_attachments (id, task_id, name, content_type, body) VALUES (?, ?, ?, ?, ?)",
@@ -1161,6 +1221,13 @@ def dashboard_data(include_deleted: bool = False) -> dict[str, object]:
         report_images.attach_metadata(db, timeline_progress)
         report_files.attach_metadata(db, timeline_progress)
         groups = task_groups(db)
+        bulk_review = workflow.pending_review_batch(db, freeze_start)
+        bulk_review.pop('eligible')
+        auto_review_row = db.execute(
+            "SELECT value FROM board_settings WHERE key=?", (AUTO_REVIEW_SETTING,)
+        ).fetchone()
+        bulk_review['last_auto_review_date'] = auto_review_row[0] if auto_review_row else None
+        bulk_review['auto_review_time'] = f'{AUTO_REVIEW_HOUR:02d}:{AUTO_REVIEW_MINUTE:02d}'
         reports = [dict(row) for row in db.execute(
             """SELECT assignee, summary, submitted_at FROM daily_reports
                WHERE report_date = ? AND submitted_at >= ? ORDER BY assignee""",
@@ -1171,7 +1238,7 @@ def dashboard_data(include_deleted: bool = False) -> dict[str, object]:
                FROM tasks WHERE planned_date = ? AND created_at >= ? AND status != '已删除' ORDER BY assignee, created_at""",
             (date_string(1), freeze_start),
         ).fetchall()]
-    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "tasks": tasks, "all_tasks": all_tasks, "deleted_tasks": deleted_tasks, "groups": groups, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
+    return {"scores": scores, "first_submission_scores": first_submission_scores, "date": today(), "tomorrow_date": date_string(1), "server_time": timestamp, "freeze_date": freeze_date, "freeze_start_ms": freeze_start or None, "tasks": tasks, "all_tasks": all_tasks, "deleted_tasks": deleted_tasks, "groups": groups, "bulk_review": bulk_review, "sessions": sessions, "progress_updates": progress_updates, "timeline_events": timeline_events, "timeline_sessions": timeline_sessions, "timeline_progress": timeline_progress, "reports": reports, "tomorrow_tasks": tomorrow_tasks}
 
 
 def analysis_context(period: str) -> dict[str, object]:
@@ -1402,7 +1469,7 @@ class Handler(BaseHTTPRequestHandler):
                     event(db,task_id,member,'平台 AI 建议评分','待验收','待验收',json.dumps(score,ensure_ascii=False),now_ms())
                 self.send_json(200, score)
                 return
-            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_close_task", "owner_set_task_score", "owner_restore_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission", "work_delete_task", "work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_update_submission", "work_report_heartbeat", "work_submit_daily_report"}
+            allowed = {"owner_insert_task", "owner_review_task", "owner_review_group", "owner_review_all", "owner_close_task", "owner_set_task_score", "owner_restore_task", "work_set_high_priority", "work_unblock_task", "work_withdraw_submission", "work_delete_task", "work_create_tasks", "work_start_task", "work_pause_task", "work_resume_task", "work_block_task", "work_finish_task", "work_update_submission", "work_report_heartbeat", "work_submit_daily_report"}
             name = data.get("action")
             if name not in allowed:
                 raise ValueError("不支持的员工操作。")
@@ -1612,9 +1679,21 @@ def main() -> None:
     args = parser.parse_args()
     DB_PATH = args.database
     initialize_database()
+    scheduler_stop = threading.Event()
+    scheduler = threading.Thread(
+        target=auto_review_scheduler,
+        args=(scheduler_stop,),
+        name="daily-auto-review",
+        daemon=True,
+    )
+    scheduler.start()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"西游团队生产看板 listening on {args.host}:{args.port}", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        scheduler_stop.set()
+        server.server_close()
 
 
 if __name__ == "__main__":

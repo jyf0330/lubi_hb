@@ -112,6 +112,7 @@
 .action-group-review{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid #e0cba4;border-radius:10px;background:#fdf3df;font-size:14px;color:#7a5320}
 .action-group-review strong{font-size:17px}
 .action-group-review .hint{color:var(--muted)}
+.bulk-review{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid #d7bf96;border-radius:12px;background:#fff7e8}.bulk-review-copy{display:grid;gap:3px}.bulk-review-copy strong{color:#744d24}.bulk-review-copy span{color:var(--muted);font-size:13px}.bulk-review button{width:100%;background:#9a633c;color:#fff}.bulk-review button:disabled{background:#d5c5b5;color:#796b5d}.bulk-review-note{font-size:12px;color:var(--muted)}
 
 /* Compact three-way filter for the owner's priority queue. */
 .action-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:-4px 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:#f6efe3}

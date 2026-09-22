@@ -8,9 +8,12 @@ const source = fs.readFileSync("server/static/app.js", "utf8");
 // The owner only reviews a big task after every child is submitted, then can
 // accept the whole group in one click using the employees' suggested total.
 assert.match(source, /action:'owner_review_group'/);
+assert.match(source, /action:'owner_review_all'/);
+assert.match(source, /每天 23:30 自动验收/);
 assert.match(source, /status !== "待验收" \|\| ready/);
 assert.match(source, /员工建议合计|员工建议总分/);
 assert.match(html, /一次验收/);
+assert.match(html, /id="bulk-review"/);
 
 const cardStart = source.indexOf("function renderActionCard");
 const groupStart = source.indexOf("function renderActionGroup", cardStart);

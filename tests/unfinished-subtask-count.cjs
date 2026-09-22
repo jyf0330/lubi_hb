@@ -24,6 +24,6 @@ assert.equal(isUnfinishedSubtask({ group_id: null, status: '进行中' }), false
 
 assert.match(source, /tasks\.filter\(isUnfinishedSubtask\)\.length/);
 assert.match(html, /仅统计大任务下的小任务/);
-assert.match(html, /app\.js\?v=unfinished-subtasks-20260922/);
+assert.match(html, /app\.js\?v=bulk-review-20260922/);
 
 console.log('UNFINISHED_SUBTASK_COUNT_OK');
