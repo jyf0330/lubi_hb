@@ -16,6 +16,12 @@ bash scripts/deploy.sh
 
 脚本会先校验工作区干净且位于目标分支，执行 `git pull --ff-only`，把现有正式文件备份到 `/opt/game-team-board/backups/deploy-<时间>-<版本>/`，只发布 `server/` 下的服务模块与 `static/` 资源，逐文件比对 md5 后重启 `game-team-board.service` 并做健康检查。它不会发布 nginx 配置、systemd 单元、测试或文档，也不会删除正式目录中仓库之外的文件。
 
+## 运行排查
+
+- 请求日志实时写入 systemd journal，可用 `journalctl -u game-team-board.service --since "10 minutes ago"` 查看。
+- Nginx 的 `sites-enabled/*` 会加载扩展名为 `.bak` 等旧配置。备份应存入 `/opt/game-team-board/backups/` 等未被 include 的目录，避免重复 `server_name`。调整加载项后必须先通过 `nginx -t`，再 reload；保留原文件以便恢复。
+- `/health` 仅确认服务进程响应；排查时还应检查 `/api/dashboard`、员工登录页和静态资源。未登录时 `/api/employee/me` 返回 401 是预期行为。
+
 # 两人游戏团队每日任务系统
 
 这是一个使用 Vinext、Cloudflare D1（SQLite）和 Drizzle 的本地任务看板，固定服务于 ZHC 与 YWT 两名成员。

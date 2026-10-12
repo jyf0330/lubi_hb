@@ -1479,7 +1479,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": str(exc)})
 
     def log_message(self, format: str, *args: object) -> None:
-        print(f"{self.address_string()} - {format % args}")
+        print(f"{self.address_string()} - {format % args}", flush=True)
 
     def send_bytes(self, status: int, body: bytes, content_type: str, extra_headers=None) -> None:
         self.send_response(status)
@@ -1510,6 +1510,8 @@ class Handler(BaseHTTPRequestHandler):
         download = parse_qs(parsed_url.query).get("download") == ["1"]
         if path in ("/employee", "/employee/", "/employee.html"):
             self.send_bytes(200, (STATIC / "employee.html").read_bytes(), "text/html; charset=utf-8")
+        elif path in ("/favicon.svg", "/employee/favicon.svg"):
+            self.send_bytes(200, (STATIC / "favicon.svg").read_bytes(), "image/svg+xml")
         elif path in ("/employee.js", "/employee.css", "/employee/employee.js", "/employee/employee.css"):
             filename = path.rsplit("/", 1)[1]
             self.send_bytes(200, (STATIC / filename).read_bytes(), "text/javascript; charset=utf-8" if filename.endswith(".js") else "text/css; charset=utf-8")
